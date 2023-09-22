@@ -1,0 +1,8 @@
+JSONTestSuite
+test.results
+check
+jsb
+*.o
+*.so
+*.dylib
+*.json
