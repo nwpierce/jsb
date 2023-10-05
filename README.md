@@ -37,6 +37,36 @@ Streams JSON to/from a friendly compact traversable binary representation with m
 	* only call those methods against well formed binary input (see below)
 * bring your own numeric serialization routines
 
+## Benchmarks
+
+Linux - 3.3GHz i3-2120:
+
+| compiler   | json -> binary | binary -> json |
+|------------|----------------|----------------|
+| gcc 7.4.0  | 485 mb/sec     | 575 mb/sec     |
+| gcc 8.3.0  | 430 mb/sec     | 565 mb/sec     |
+| gcc 9.3.0  | 445 mb/sec     | 410 mb/sec     |
+| gcc 10.2.1 | 475 mb/sec     | 405 mb/sec     |
+| gcc 11.3.0 | 420 mb/sec     | 525 mb/sec     |
+| gcc 12.2.0 | 420 mb/sec     | 555 mb/sec     |
+
+Linux - 1.2 (3.8 Turbo boost) GHz i7-1060NG7:
+
+| compiler   | json -> binary | binary -> json |
+|------------|----------------|----------------|
+| gcc 7.4.0  | 780 mb/sec     | 935 mb/sec     |
+| gcc 8.3.0  | 685 mb/sec     | 895 mb/sec     |
+| gcc 9.3.0  | 760 mb/sec     | 610 mb/sec     |
+| gcc 10.2.0 | 765 mb/sec     | 580 mb/sec     |
+| gcc 11.3.0 | 645 mb/sec     | 630 mb/sec     |
+| gcc 12.2.0 | 705 mb/sec     | 825 mb/sec     |
+
+macOS - 1.2 (3.8 Turbo boost) GHz i7-1060NG7:
+
+| compiler   | json -> binary | binary -> json |
+|------------|----------------|----------------|
+| clang 15   | 570 mb/sec     | 485 mb/sec     |
+
 ## Binary encoding:
 
 Design goals for the binary encoding include:
