@@ -39,6 +39,19 @@ Streams JSON to/from a friendly compact traversable binary representation with m
 
 ## Benchmarks
 
+Using a large geojson file and doing:
+
+```
+make jsb
+jsb < foo.geojson > foo.bin
+```
+
+Here are some results of repeatedly running both:
+```
+jsb -vt < foo.geojson
+jsb -vt < foo.bin
+```
+
 Linux - 3.3GHz i3-2120:
 
 | compiler   | json -> binary | binary -> json |
@@ -50,7 +63,7 @@ Linux - 3.3GHz i3-2120:
 | gcc 11.3.0 | 420 mb/sec     | 525 mb/sec     |
 | gcc 12.2.0 | 420 mb/sec     | 555 mb/sec     |
 
-Linux - 1.2 (3.8 Turbo boost) GHz i7-1060NG7:
+Linux - 1.2 (3.8 Turbo boost) GHz i7-1060NG7 (via qemu):
 
 | compiler   | json -> binary | binary -> json |
 |------------|----------------|----------------|
@@ -66,6 +79,23 @@ macOS - 1.2 (3.8 Turbo boost) GHz i7-1060NG7:
 | compiler   | json -> binary | binary -> json |
 |------------|----------------|----------------|
 | clang 15   | 570 mb/sec     | 485 mb/sec     |
+
+Linux - Apple M1 (via qemu):
+
+| compiler   | json -> binary | binary -> json |
+|------------|----------------|----------------|
+| gcc 7.4.0  | 985 mb/sec     | 1145 mb/sec    |
+| gcc 8.3.0  | 1030 mb/sec    | 955 mb/sec     |
+| gcc 9.3.0  | 835 mb/sec     | 1000 mb/sec    |
+| gcc 10.2.1 | 880 mb/sec     | 1015 mb/sec    |
+| gcc 11.3.0 | 985 mb/sec     | 1135 mb/sec    |
+| gcc 12.2.0 | 970 mb/sec     | 1105 mb/sec    |
+
+macOS - Apple M1:
+
+| compiler   | json -> binary | binary -> json |
+|------------|----------------|----------------|
+| clang 15   | 750 mb/sec     | 950 mb/sec     |
 
 ## Binary encoding:
 
