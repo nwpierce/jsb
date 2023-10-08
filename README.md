@@ -1,10 +1,10 @@
 # libjsb
 
-Streams JSON to/from a friendly compact traversable binary representation with minimal storage overhead. Intended to support easy and efficient consumption and production of JSON.
+Libjsb streams JSON to/from a friendly compact traversable binary representation with minimal storage overhead. Intended to support easy and efficient consumption and production of JSON. Motivation and/or inspiration for libjsb include [jsmn](https://github.com/zserge/jsmn) and Andrew Kelley's talk on [Data-Oriented Design](https://vimeo.com/649009599).
 
 ## Features:
 
-* fast
+* [fast](#benchmarks)
 * incremental
 * embeddable
 	* no runtime dependencies
@@ -23,7 +23,7 @@ Streams JSON to/from a friendly compact traversable binary representation with m
 	* scientific notation exponents:
 		* '+' is stripped
 		* 'E' lowercased to 'e'
-* reasonably compact binary representation
+* reasonably compact [binary representation](#binary-representation)
 	* at most, two bytes larger than input JSON
 * can optionally process multiple concatenated JSON documents
 * can optionally emit pure ASCII JSON
@@ -97,9 +97,9 @@ macOS - Apple M1:
 |------------|----------------|----------------|
 | clang 15   | 750 mb/sec     | 950 mb/sec     |
 
-## Binary encoding:
+## Binary representation:
 
-Design goals for the binary encoding include:
+Design goals for the binary representation include:
 
 * simple structure
 * straightforward traversal
@@ -120,7 +120,7 @@ Design goals for the binary encoding include:
 	* objects with n key/value pairs are 2n-1 bytes smaller
 	* documents are one byte larger
 
-Valid JSON unicode character code points fall in ranges 0x0 - 0xd7ff and 0xe000 - 0x10FFFF. UTF-8-encoded sequences for these can involve all but 13 bytes, 11 of which are used as tokens in the binary encoding:
+Valid JSON unicode character code points fall in ranges 0x0 - 0xd7ff and 0xe000 - 0x10FFFF. UTF-8-encoded sequences for these can involve all but 13 bytes, 11 of which are used as tokens in the binary representation:
 
 * 0xc0: unused
 * 0xc1: unused
