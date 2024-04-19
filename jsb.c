@@ -1,5 +1,7 @@
 #include"jsb.h"
 
+#include<sys/types.h>
+
 #define   likely(x) x
 #define unlikely(x) x
 #ifdef __has_builtin
@@ -786,23 +788,35 @@ J(decimal_more):
 	JUMP(endnum);
 
 J(exponent):
-	ch = 'e';
-	ADDCH;
+	APPEND('e');
 	NEXT(0);
-	if('-' == ch || '+' == ch){
-		if('-' == ch)
-			ADDCH;
+	shift = ('-' == ch);
+	if('-' == ch || '+' == ch)
 		NEXT(0);
-	}
-	if(digit(ch))
+	if(pdigit(ch))
 		JUMP(exponent_more);
+	else if(ch == '0')
+		JUMP(exponent_zero);
 	ERROR;
 
+J(exponent_zero):
+	do{
+		NEXT(0);
+	}while(ch == '0');
+	if(digit(ch))
+		JUMP(exponent_more);
+	APPEND('0');
+	JUMP(endnum);
+
 J(exponent_more):
+	if(shift)
+		APPEND('-');
+
+J(exponent_more2):
 	ADDCH;
 	NEXT(0);
 	if(digit(ch))
-		JUMP(exponent_more);
+		JUMP(exponent_more2);
 	JUMP(endnum);
 
 J(null):
@@ -1213,7 +1227,9 @@ JSB_API size_t jsb_bool(const void *base, size_t offset){
 		case JSB_ARR:
 		case JSB_OBJ:   return bin[offset + 1] == (t ^ XND) ? 0 : 1;
 	}
-	while(t = bin[++offset], t < 0xf5){
+	t = bin[++offset];
+	offset += (t == '-');
+	while(t = bin[offset++], t < 0xf5){
 		if(t == '0' || t == '.' || t == '-') continue;
 		assert((t >= '1' && t <= '9') || t == 'e');
 		return t != 'e';
@@ -1456,6 +1472,171 @@ done:
 error:
 	ret = JSB_ERROR;
 	goto done;
+}
+
+typedef struct {
+	const uint8_t *msd;
+	const uint8_t *dot;
+	const uint8_t *ipart;
+	const uint8_t *ipart_end;
+	const uint8_t *fpart;
+	const uint8_t *fpart_end;
+	const uint8_t *epart;
+	const uint8_t *epart_end;
+	uint8_t negative:1;
+	uint8_t e_negative:1;
+	uint8_t zero:1;
+} ns_t;
+
+/* harvest boundaries of parts of scientific-notation-style numbers */
+static void numwalk(const uint8_t *s, ns_t *ns){
+	ns->ipart = ns->ipart_end = 0;
+	ns->fpart = ns->fpart_end = 0;
+	ns->epart = ns->epart_end = 0;
+	ns->negative = (*s == '-');
+	ns->e_negative = 0;
+	ns->zero = 1;
+
+	s += (*s == '-' || *s == '+');
+	ns->ipart = ns->msd = s;
+	while(*s >= '0' && *s <= '9'){
+		if(ns->zero && '0' != *s){
+			ns->msd = s;
+			ns->zero = 0;
+		}
+		s++;
+	}
+	ns->ipart_end = ns->dot = s;
+	if(*s == '.'){
+		ns->fpart = ++s;
+		while(*s >= '0' && *s <= '9'){
+			if(ns->zero && '0' != *s){
+				ns->msd = s;
+				ns->zero = 0;
+			}
+			s++;
+		}
+		ns->fpart_end = s;
+	}
+	if(*s == 'e' || *s == 'E'){
+		ns->e_negative = (*++s == '-');
+		s += (*s == '-' || *s == '+');
+		ns->epart = s;
+		while(*s >= '0' && *s <= '9')
+			s++;
+		ns->epart_end = s;
+	}
+}
+
+static const uint8_t *step(int *r, ssize_t *d, int m, const uint8_t *ea, const uint8_t *eb){
+	/* convert next least significant digit to numeric, else zero if we've run out */
+	int x = (ea != eb) ? (*--eb - '0') * m : 0;
+	int y = *d % 10; /* grab last delta digit: [-9 .. 9]               */
+	*d /= 10;        /* shift delta right one digit                    */
+	x += y;          /* merge                                          */
+	*r = x % 10;     /* return right-most digit                        */
+	*d += x / 10;    /* shift right, and merge with delta              */
+	return eb;       /* return possibly changed end-of-exponent marker */
+}
+
+static const uint8_t *istep(int *r, const uint8_t *c, ns_t *ns){
+	if(c == ns->ipart_end)   /* jump from end of integer to fractional */
+		c = ns->fpart;       /* fpart may equal fpart_end              */
+	if(c == ns->fpart_end)   /* pad with trailing zero if at end       */
+		*r = '0';
+	else
+		*r = *c++;
+	return c;
+}
+
+/* numerically compare two stringified json-style numbers */
+int numcmp(const uint8_t *n0, const uint8_t *n1){
+	ns_t ns0, ns1;
+	ssize_t d0, d1;
+	int r = 0, m0, m1, r0, r1;
+	const uint8_t *c0, *c1;
+
+	/* find boundaries in scientific notation strings */
+	numwalk(n0, &ns0);
+	numwalk(n1, &ns1);
+
+	/* first check if either evaluate to zero */
+	if(ns0.zero && ns1.zero) return 0;
+	if(ns0.zero) return ns1.negative ?  1 : -1;
+	if(ns1.zero) return ns0.negative ? -1 :  1;
+
+	/* else both are non-zero - check the sign for an easy win */
+	if( ns0.negative && !ns1.negative) return -1;
+	if(!ns0.negative &&  ns1.negative) return  1;
+	/* signs are the same - treat as positive, and invert later as needed */
+
+	/* calculate exponent normalization delta */
+	d0 = ns0.dot - ns0.msd + (ns0.msd > ns0.dot);
+	d1 = ns1.dot - ns1.msd + (ns1.msd > ns1.dot);
+
+	/* get end-of-exponent cursor */
+	c0 = ns0.epart_end;
+	c1 = ns1.epart_end;
+
+	/* convert negative exponent into multiplier */
+	m0 = 1 - (ns0.e_negative << 1);
+	m1 = 1 - (ns1.e_negative << 1);
+
+	/* now step through both exponents to compare, adding the delta on the fly */
+	while(d0 || d1 || c0 != ns0.epart || c1 != ns1.epart){
+		/* returns next least significant digit of result in r0/r1 */
+		c0 = step(&r0, &d0, m0, ns0.epart, c0);
+		c1 = step(&r1, &d1, m1, ns1.epart, c1);
+		/* if r0 == r1, preserve existing compare value */
+		r = r0 < r1 ? -1 : r0 > r1 ? 1 : r;
+	}
+
+	/* larger or smaller exponent wins */
+	if(!r){
+		/* step through digits starting at msd, padding w/ zeros as necessary */
+		c0 = ns0.msd;
+		c1 = ns1.msd;
+		do{
+			c0 = istep(&r0, c0, &ns0);
+			c1 = istep(&r1, c1, &ns1);
+			r = r0 - r1;
+			r = (r > 0) - (r < 0);
+		}while(!r && (c0 != ns0.fpart_end || c1 != ns1.fpart_end));
+	}
+
+	/* invert result if both were negative */
+	if(ns0.negative /* && ns1.negative */)
+		r = -r;
+
+	return r;
+}
+
+JSB_API int jsb_cmp(const void *base0, size_t offset0, const void *base1, size_t offset1){
+	const uint8_t *n0 = (const uint8_t *)base0 + offset0;
+	const uint8_t *n1 = (const uint8_t *)base1 + offset1;
+	int t;
+
+	switch(*n0){
+		default:        return 0;
+		case JSB_NULL:  return *n1 == JSB_NULL;
+		case JSB_FALSE: return (*n1 == JSB_TRUE)  ? -1 : (*n1 == JSB_FALSE);
+		case JSB_TRUE:  return (*n1 == JSB_FALSE) ?  3 : (*n1 == JSB_TRUE);
+		case JSB_STR:
+		case JSB_KEY:
+			if(*n1 != JSB_STR || *n1 != JSB_KEY)
+				return 0;
+			do{
+				t = (*++n0 >= 0xf5) - (*++n1 >= 0xf5);
+				if(t) break;
+				t = *n0 - *n1;
+				t = (t > 0) - (t < 0);
+			}while(!t);
+			return (t<<1)|1;
+		case JSB_NUM:
+			if(*n1 != JSB_NUM)
+				return 0;
+			return (numcmp(++n0, ++n1) << 1) | 1;
+	}
 }
 
 /* ensure that all previously used jsb->state values actually fit */

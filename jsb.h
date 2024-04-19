@@ -232,6 +232,23 @@ JSB_API void jsb_prepare(size_t *keyinfo, const void *keys, size_t flags);
  */
 JSB_API size_t jsb_match(const void *base, size_t offset, const size_t *meta, const void *keys, const size_t *keyinfo, size_t *offsets);
 
+/* compare two scalar json values of matching class
+ * returns:
+ *     0: error (arrays, objects, mismatched value class, or bad type code)
+ *    -1: less than
+ *     1: equal to
+ *     3: greater than
+ *   if non-zero: (r >> 1) => -1/0/1, corresponding to lt/eq/gt, memcmp-style
+ * note - will only return non-errors for:
+ *   null vs null
+ *   boolean vs boolean
+ *   string/key vs string/key
+ *   number vs number
+ * in order to support arbitrary precision, numbers are manually compared,
+ * rather than potentially lossily parsed into native floating point types
+ */
+JSB_API int jsb_cmp(const void *base0, size_t offset0, const void *base1, size_t offset1);
+
 #ifdef __cplusplus
 }
 #endif
