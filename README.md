@@ -21,8 +21,10 @@ Libjsb streams JSON to/from a friendly compact traversable binary representation
 * numbers stored internally as strings
 	* no imposed loss of precision
 	* scientific notation exponents:
-		* '+' is stripped
-		* 'E' lowercased to 'e'
+		* `+` is stripped
+		* `E` lowercased to `e`
+		* redundant leading zeros are stripped
+		* sign is stripped if exponent is zero
 * reasonably compact [binary representation](#binary-representation)
 	* at most, two bytes larger than input JSON
 * can optionally process multiple concatenated JSON documents
