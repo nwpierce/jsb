@@ -25,14 +25,14 @@ Libjsb streams JSON to/from a friendly compact traversable binary representation
 		* `E` lowercased to `e`
 		* redundant leading zeros are stripped
 		* sign is stripped if exponent is zero
+	* includes an algorithm for numerically comparing stringified numbers
+		* without internally parsing to native floating point (and potentially losing precision)
 * reasonably compact [binary representation](#binary-representation)
 	* at most, two bytes larger than input JSON
 * can optionally process multiple concatenated JSON documents
 * can optionally emit pure ASCII JSON
 * resulting binary form can be traversed
 	* may optionally be indexed to accelerate traversal routines
-* includes an algorithm for numerically comparing stringified numbers
-	* without internally parsing to native floating point (and potentially losing precision)
 
 ## Potentially less desirable features:
 
