@@ -31,6 +31,8 @@ Libjsb streams JSON to/from a friendly compact traversable binary representation
 * can optionally emit pure ASCII JSON
 * resulting binary form can be traversed
 	* may optionally be indexed to accelerate traversal routines
+* includes an algorithm for numerically comparing stringified numbers
+	* without internally parsing to native floating point (and potentially losing precision)
 
 ## Potentially less desirable features:
 
