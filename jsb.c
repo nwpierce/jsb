@@ -1,18 +1,3 @@
-#include"jsb.h"
-
-#include<sys/types.h>
-
-#define   likely(x) x
-#define unlikely(x) x
-#ifdef __has_builtin
-#if __has_builtin(__builtin_expect)
-#undef    likely
-#undef  unlikely
-#define   likely(x) __builtin_expect(!!(x), 1)
-#define unlikely(x) __builtin_expect(!!(x), 0)
-#endif
-#endif
-
 #if RELEASE
 #undef NDEBUG
 #define NDEBUG
@@ -21,11 +6,20 @@
 #include<string.h>
 #endif
 
+#include"jsb.h"
+
+#include<sys/types.h>
+#include<alloca.h>
+
 #ifdef NDEBUG
 #define assert(cond) ((void)0)
 #else
 #include<assert.h>
 #include<stdarg.h>
+#endif
+
+#ifndef PRIVATE
+#define PRIVATE static
 #endif
 
 #if RELEASE || !defined(DEBUG)
@@ -55,10 +49,14 @@ static void dbg(char *fmt, ...){
 #endif
 #endif
 
-
 /* bytes 0xc0 and 0xc1 are both invalid in JSON as well as our binary format
  * we'll borrow one to use internally as the EOF marker */
 #define JSB_INT_EOF 0xc1
+
+/*#define PICK(x, a, b) ((x) ? a : b)*/
+/*#define PICK(x, a, b) ((a) ^ (!(x) * ((a)^(b))))*/
+#define PICK(x, a, b) ((b) ^ (!!(x) * ((a)^(b))))
+/*#define PICK(x, a, b) ((b) ^ ((x) * ((a)^(b))))*/
 
 #define XND 8 /* xor to toggle JSB_ARR/JSB_OBJ to JSB_ARR_END/JSB_OBJ_END */
 #define XAO 1 /* xor to toggle JSB_ARR/JSB_ARR_END to JSB_OBJ/JSB_OBJ_END */
@@ -98,49 +96,6 @@ STATIC_ASSERT(__COUNTER__ + 1 == __COUNTER__, "check counter");
  * Utility functions
  */
 
-/* copy potentially overlapping buffer from end to start */
-static void mrcp(uint8_t *dst, uint8_t const *src, size_t len){
-	const uint8_t *end = dst;
-	dst += len;
-	src += len;
-	while(dst != end)
-		*--dst = *--src;
-}
-
-/* copy potentially overlapping buffer from start to end */
-static void mfcp(uint8_t *dst, uint8_t const *src, size_t len){
-	const uint8_t *end = dst + len;
-	while(dst != end)
-		*dst++ = *src++;
-}
-
-/* memcpy() */
-static void mcp(void * __restrict dst, void const * __restrict src, size_t len){
-	mfcp(dst, src, len);
-}
-
-/* memmove() */
-static void mmv(void *dst, void *src, size_t len){
-	uintptr_t d = (uintptr_t)dst;
-	uintptr_t s = (uintptr_t)src;
-	assert((uintptr_t)-1 - d > len);
-	assert((uintptr_t)-1 - s > len);
-	if(d == s)
-		return;
-	if(d < s){
-		if(d + len > s){
-			mfcp(dst, src, len);
-			return;
-		}
-	}else{
-		if(s + len > d){
-			mrcp(dst, src, len);
-			return;
-		}
-	}
-	mcp(dst, src, len);
-}
-
 static int mcmp(const void *s1, const void *s2, size_t n){
 	const uint8_t *a = s1, *b = s2;
 	int r;
@@ -152,16 +107,17 @@ static int mcmp(const void *s1, const void *s2, size_t n){
 
 static size_t strsz(const void *s){
 	const uint8_t *c = s;
-	size_t ret;
+	size_t n;
 	assert(s);
 	while(*c)
 		c++;
-	ret = c - (const uint8_t *)s;
+	n = c - (const uint8_t *)s;
 #if !RELEASE
-	assert(strlen(s) == ret);
+	assert(strlen(s) == n);
 #endif
-	return ret;
+	return n;
 }
+
 
 /* ensure ASCII-based assumptions are valid */
 
@@ -196,23 +152,23 @@ STATIC_ASSERT('D' + 1 == 'E', "DE");
 STATIC_ASSERT('E' + 1 == 'F', "EF");
 
 /* return 1 if supplied character is JSON-flavored whitespace */
-static uint8_t space(uint8_t ch){
-	if(likely(ch > ' ')) return 0;
-	return likely(ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r');
+PRIVATE uint8_t space(uint8_t ch){
+	if(ch > ' ') return 0;
+	return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
 }
 
 /* digit */
-static uint8_t digit(uint8_t ch){
+PRIVATE uint8_t digit(uint8_t ch){
 	return ch >= '0' && ch <= '9';
 }
 
 /* positive digit */
-static uint8_t pdigit(uint8_t ch){
+PRIVATE uint8_t pdigit(uint8_t ch){
 	return ch >= '1' && ch <= '9';
 }
 
 /* map hexidecimal character to numeric value or -1 on error */
-static int hex(uint8_t ch){
+PRIVATE int hex(uint8_t ch){
 	if(ch >= '0' && ch <= '9')
 		return ch - '0';
 	if(ch >= 'a' && ch <= 'f')
@@ -223,7 +179,7 @@ static int hex(uint8_t ch){
 }
 
 /* map lower 4 bits to hexidecimal character */
-static uint8_t nibble(uint8_t ch){
+PRIVATE uint8_t nibble(uint8_t ch){
 	ch &= 0xf;
 	return ch + (ch < 0xa ? '0' : 'a' - 0xa);
 }
@@ -233,7 +189,7 @@ static uint8_t nibble(uint8_t ch){
 typedef int heap_test(void *data, size_t a, size_t b);
 typedef void heap_swap(void *data, size_t a, size_t b);
 
-static void heap_siftdown(void *data, size_t n, heap_test test, heap_swap swap, size_t i){
+PRIVATE void heap_siftdown(void *data, size_t n, heap_test test, heap_swap swap, size_t i){
 	size_t t = i;
 	size_t a = 2 * i + 1;
 	size_t b = 2 * i + 2;
@@ -247,13 +203,13 @@ static void heap_siftdown(void *data, size_t n, heap_test test, heap_swap swap, 
 	}
 }
 
-static void heap_ify(void *data, size_t n, heap_test test, heap_swap swap){
+PRIVATE void heap_ify(void *data, size_t n, heap_test test, heap_swap swap){
 	size_t i = n / 2;
 	while(i--)
 		heap_siftdown(data, n, test, swap, i);
 }
 
-static void heap_sort(void *data, size_t n, heap_test test, heap_swap swap){
+PRIVATE void heap_sort(void *data, size_t n, heap_test test, heap_swap swap){
 	heap_ify(data, n, test, swap);
 	while(n-- > 1){
 		swap(data, 0, n);
@@ -269,7 +225,7 @@ static void heap_sort(void *data, size_t n, heap_test test, heap_swap swap){
 
 typedef size_t node_t[3];
 
-static void swap_nodes(void *data, size_t a, size_t b){
+PRIVATE void swap_nodes(void *data, size_t a, size_t b){
 	node_t *nodes = data;
 	size_t i, t;
 	assert(a != b);
@@ -281,25 +237,25 @@ static void swap_nodes(void *data, size_t a, size_t b){
 }
 
 /* used for deciding what to keep in the index - minheap by size/count */
-static int sz_a_gt_b(node_t a, node_t b){
+PRIVATE int sz_a_gt_b(node_t a, node_t b){
 	assert(a != b);
 	return a[1] > b[1] || (a[1] == b[1] && a[2] > b[2]);
 }
 
 /* wrapper for the above */
-static int hs_sz_a_gt_b(void *data, size_t a, size_t b){
+PRIVATE int hs_sz_a_gt_b(void *data, size_t a, size_t b){
 	node_t *nodes = data;
 	return sz_a_gt_b(nodes[a], nodes[b]);
 }
 
 /* used for second pass - maxheap by offset */
-static int hs_off_a_lt_b(void *data, size_t a, size_t b){
+PRIVATE int hs_off_a_lt_b(void *data, size_t a, size_t b){
 	node_t *nodes = data;
 	assert(a != b);
 	return nodes[a][0] < nodes[b][0];
 }
 
-static void idx_insert(size_t n, size_t *idx, node_t v){
+PRIVATE void idx_insert(size_t n, size_t *idx, node_t v){
 	node_t *arr = (node_t *)(idx + IDX_HDR);
 	size_t j, i = idx[0];
 	if(i < n){
@@ -324,7 +280,7 @@ static void idx_insert(size_t n, size_t *idx, node_t v){
 	}
 }
 
-static size_t idx_finish(size_t *idx, size_t n){
+PRIVATE size_t idx_finish(size_t *idx, size_t n){
 	size_t i = (n < idx[0]) ? (idx[0] = n) : (n = idx[0]);
 	node_t *arr = (node_t *)(idx + IDX_HDR);
 	/* now heapsort on byte-offset column, low -> high */
@@ -335,7 +291,7 @@ static size_t idx_finish(size_t *idx, size_t n){
 }
 
 /* return first index node >= supplied offset, possibly off=SIZE_MAX */
-static const size_t *idx_seek(const size_t *idx, size_t off){
+PRIVATE const size_t *idx_seek(const size_t *idx, size_t off){
 	size_t ret, mid, lo = 0, hi = ret = idx[0];
 	node_t *nodes = (node_t *)(idx + IDX_HDR);
 	while(lo < hi){
@@ -349,7 +305,7 @@ static const size_t *idx_seek(const size_t *idx, size_t off){
 	return (size_t *)nodes[ret];
 }
 
-static const size_t *idx_find(const size_t *idx, size_t off){
+PRIVATE const size_t *idx_find(const size_t *idx, size_t off){
 	const size_t *r = NULL;
 	if(idx && idx[0]){
 		r = idx_seek(idx, off);
@@ -359,7 +315,7 @@ static const size_t *idx_find(const size_t *idx, size_t off){
 	return r;
 }
 
-static size_t _jsb_str_count(const uint8_t *bin, size_t off, size_t *endpos){
+PRIVATE size_t _jsb_str_count(const uint8_t *bin, size_t off, size_t *endpos){
 	size_t c = 0;
 	uint8_t b = bin[off];
 	while(b < 0xf5){
@@ -371,9 +327,9 @@ static size_t _jsb_str_count(const uint8_t *bin, size_t off, size_t *endpos){
 	return c;
 }
 
-static size_t _jsb_size(const void *base, size_t offset, const size_t *meta);
+PRIVATE size_t _jsb_size(const void *base, size_t offset, const size_t *meta);
 
-static size_t idx_load(const uint8_t *bin, size_t off, size_t *idx, const size_t n, const size_t m, size_t d){
+PRIVATE size_t idx_load(const uint8_t *bin, size_t off, size_t *idx, const size_t n, const size_t m, size_t d){
 	uint8_t t = bin[off];
 	node_t v = { 0, 0, 0 };
 	v[0] = off++;
@@ -439,89 +395,37 @@ done:
  * Parser API
  */
 
-#define JSZ (sizeof(jsb_t) / sizeof(size_t) + !!(sizeof(jsb_t) % sizeof(size_t)))
-
-/* initialize parse object - provide size of output/state buffer */
-static  size_t _jsb_init(jsb_t *jsb, size_t dstlen, size_t flags);
-JSB_API size_t  jsb_init(jsb_t *jsb, size_t dstlen, size_t flags){ return _jsb_init(jsb, dstlen, flags); }
-static  size_t _jsb_init(jsb_t *jsb, size_t dstlen, size_t flags){
-	size_t r = (flags & JSB_SIZE) ? JSZ : 0;
-	debug(("jsb_init(%p, %zu, %zx)\n", (void *)jsb, dstlen, flags));
-	if(!r){
-		jsb->dstpos = jsb->srcpos = jsb->srclen = 0;
-		jsb->depth = jsb->eat = 0;
-		jsb->code = 0;
-		jsb->ch = jsb->bt = jsb->state = jsb->misc = 0;
-		jsb->dstlen = jsb->stack = dstlen;
-		jsb->flags = flags;
-	}
-	return r;
+/* return number of jsb_unit_t's required to back a jsb_t for a given maximum json depth */
+PRIVATE size_t __attribute__((const)) _jsb_units(size_t maxdepth);
+JSB_API size_t __attribute__((const))  jsb_units(size_t maxdepth){ return _jsb_units(maxdepth); }
+PRIVATE size_t __attribute__((const)) _jsb_units(size_t maxdepth){
+	const size_t bc = ((maxdepth == (size_t)-1 ? JSB_DEFAULT_STACK_BYTES : maxdepth) + 7) / 8;
+	return (JSB_SIZE + bc + sizeof(jsb_unit_t) - 1) / sizeof(jsb_unit_t);
 }
 
-/* call at start of streaming api functions to complete jsb_consume */
-static void _jsb_eat(jsb_t *jsb, uint8_t *dst){
-	size_t len, eat = jsb->eat, dstpos = jsb->dstpos;
-	if(eat){
-		assert(eat <= dstpos);
-		len = dstpos - eat;
-		mmv(dst, dst + eat, len);
-		jsb->dstpos = len;
-		jsb->eat = 0;
-	}
-}
+/* initialize jsb parser state */
+PRIVATE size_t _jsb_init(jsb_t *jsb, uint32_t flags, size_t jsbsize);
+JSB_API size_t  jsb_init(jsb_t *jsb, uint32_t flags, size_t jsbsize){ return _jsb_init(jsb, flags, jsbsize); }
+PRIVATE size_t _jsb_init(jsb_t *jsb, uint32_t flags, size_t jsbsize){
+	size_t stackbytes = (jsbsize < JSB_SIZE) ? JSB_DEFAULT_STACK_BYTES : (jsbsize - JSB_SIZE);
+	debug(("jsb_init(%p, %zx, %zu)\n", (void *)jsb, (size_t)flags, jsbsize));
 
-/* indicate caller will consume up to n bytes from dst */
-JSB_API size_t jsb_consume(jsb_t *jsb, void *dst, size_t n){
-	debug(("jsb_consume(%p, %p, %zu)\n", (void *)jsb, dst, n));
-	_jsb_eat(jsb, dst);
-	if(n < jsb->dstpos){
-		debug(("eat: %zu < %zu\n", n, jsb->dstpos));
-		jsb->eat = n;
-	}else{
-		debug(("eat: %zu -> %zu\n", n, jsb->dstpos));
-		n = jsb->dstpos;
-		jsb->dstpos = 0;
-	}
-	return n;
-}
-
-/* call after growing or prior to shrinking dst buffer */
-JSB_API size_t jsb_dstlen(jsb_t *jsb, void *dst, size_t dstlen){
-	size_t stklen, min, stk;
-	debug(("jsb_dstlen(%p, %p, %zu)\n", (void *)jsb, dst, dstlen));
-	_jsb_eat(jsb, dst);
-	/* grab current stack size at end of dst buffer */
-	stklen = jsb->dstlen - jsb->stack;
-	/* round requested dstlen up to minimum buffer size */
-	min = jsb->dstpos + stklen;
-	if(dstlen < min)
-		dstlen = min;
-	/* calculate new stack offset */
-	stk = dstlen - stklen;
-	/* relocate the (possibly overlapping) stack contents */
-	mmv((uint8_t *)dst + stk, (uint8_t *)dst + jsb->stack, stklen);
-	/* fill in new stack offset */
-	jsb->stack = stk;
-	/* and set & return new dst buffer size */
-	return jsb->dstlen = dstlen;
-}
-
-/* call to supply parser with new input chunk size */
-static  size_t _jsb_srclen(jsb_t *jsb, size_t len);
-JSB_API size_t  jsb_srclen(jsb_t *jsb, size_t len){ return _jsb_srclen(jsb, len); }
-static  size_t _jsb_srclen(jsb_t *jsb, size_t len){
-	debug(("jsb_srclen(%p, %zu)\n", (void *)jsb, len));
-	if(jsb->srcpos != jsb->srclen || JSB_INT_EOF == jsb->ch){
-		assert(0);
-		return JSB_ERROR;
-	}
-	if(len){
-		jsb->srcpos = 0;
-		jsb->srclen = len;
-	}else{
-		jsb->ch = JSB_INT_EOF;
-	}
-	return 0;
+	/* don't modify next_in/avail_in/next_out/avail_out */
+	jsb->total_out = 0;
+	jsb->total_in = 0;
+	jsb->depth = 0;
+	*(size_t *)&jsb->maxdepth = stackbytes * 8;
+	*(uint32_t *)&jsb->flags = flags;
+	jsb->obj = 0;
+	jsb->key = 0;
+	jsb->misc = 0;
+	jsb->code = 0;
+	jsb->state = 0;
+	jsb->ch = 0;
+	jsb->outb = JSB_INT_EOF;
+	while(stackbytes--)
+		jsb->stack[stackbytes] = 0;
+	return jsb->maxdepth;
 }
 
 #define F(x) f_ ## x
@@ -534,113 +438,152 @@ enum { CB = __COUNTER__ };
 
 #define YIELD(sz) do{                          \
 	enum { ctr = __COUNTER__ - CB };           \
-	jsb->state = ctr;                          \
+	*((uint8_t *)&jsb->state) = ctr;           \
 	ret = sz;                                  \
 	GOTO(F(yield));                            \
 	case ctr: break;                           \
 }while(0)
 
-#define UNSTASH (assert(stack < jsb->dstlen),dst[stack++])
-
 #define BEGIN(x) switch(x){ default: ERROR; case 0
 
 #define END }
 
-#define ADDCH do{                              \
-	debug(("addch: %02x\n", ch));              \
-	assert(JSB_INT_EOF != ch);                 \
-	while(dstpos == stack)                     \
-		YIELD(JSB_FULL);                       \
-	dst[dstpos++] = ch;                        \
-}while(0)
+#define ADDCH APPEND(jsb->ch)
 
 #define APPEND(x) do{                          \
-	bt = (x);                                  \
-	debug(("append: %02x\n", bt));             \
-	assert(JSB_INT_EOF != bt);                 \
-	while(dstpos == stack)                     \
-		YIELD(JSB_FULL);                       \
-	dst[dstpos++] = bt;                        \
+	const uint8_t t = (x);                     \
+	debug(("append: %02x\n", t));              \
+	assert(JSB_INT_EOF != t);                  \
+	if(dstpos != dstlen){                      \
+		dst[dstpos++] = t;                     \
+	}else{                                     \
+		*(uint8_t *)&jsb->outb = t;            \
+		YIELD(JSB_OK);                         \
+	}                                          \
 }while(0)
 
-#define STASH(x) do{                           \
-	bt = (x);                                  \
-	debug(("stash: %02x\n", bt));              \
-	while(dstpos == stack)                     \
-		YIELD(JSB_FULL);                       \
-	dst[--stack] = bt;                         \
-}while(0)
+/* tag labels with line number for use within a macro */
+#define __tag(x, y) x ## y
+#define _tag(x, y) __tag(x, y)
+#define tag(x) _tag(x, __LINE__)
 
 #define NEXT(sw) do{                           \
 	debug(("next!\n"));                        \
-	while(1){                                  \
-		if(srcpos != srclen){                  \
-			ch = src[srcpos++];                \
-			if(0xc0 == ch || 0xc1 == ch)       \
-				ERROR;                         \
-			if(sw && space(ch))                \
-				continue;                      \
-			debug(("ch: %02x\n", ch));         \
-			break;                             \
-		}else if(JSB_INT_EOF == ch){           \
-			debug(("ch: EOF\n"));              \
-			break;                             \
-		}else{                                 \
-			YIELD(JSB_FILL);                   \
-		}                                      \
+tag(next):                                     \
+	if(srcpos != srclen){                      \
+		jsb->ch = src[srcpos++];               \
+		if(sw && space(jsb->ch))               \
+			goto tag(next);                    \
+		if(0xc0 == jsb->ch || 0xc1 == jsb->ch) \
+		    ERROR;                             \
+		debug(("ch: %02x\n", jsb->ch));        \
+	}else if(eof){                             \
+		debug(("ch: EOF\n"));                  \
+		jsb->ch = JSB_INT_EOF;                 \
+	}else{                                     \
+		YIELD(JSB_OK);                         \
+		goto tag(next);                        \
 	}                                          \
 }while(0)
 
 #define ERROR do{ jsb->code = __LINE__; JUMP(error); }while(0)
 
-static size_t _jsb_load(jsb_t *jsb, uint8_t * const dst, const uint8_t * const src){
+PRIVATE size_t __attribute__((noinline)) _jsb_load(jsb_t *jsb){
 	size_t ret;
 
-	/* clone, but no need to restore read-only ptr */
-	const size_t srclen = jsb->srclen;
+	size_t srcpos = 0;
+	size_t dstpos = 0;
 
-	size_t srcpos, stack, dstpos;
-	uint8_t key, obj, shift, ch, bt;
-	uint32_t tmp;
+	/* read-only clone - no need to restore */
+	const int eof = jsb->flags & JSB_EOF;
+	const size_t srclen = jsb->avail_in;
+	const size_t dstlen = jsb->avail_out;
+	const uint8_t * const src = jsb->next_in;
+	uint8_t * const dst = jsb->next_out;
 
-	debug(("jsb_load(%p, %p, %p)\n", (void *)jsb, dst, src));
-	_jsb_eat(jsb, dst);
+	debug(("jsb_load(%p, %d)\n", (void *)jsb, eof));
 
-
-	/* clone on entry & restore on yield */
-	dstpos = jsb->dstpos;
-	srcpos = jsb->srcpos;
-	stack  = jsb->stack;
-	key    = ((1<<3) & jsb->misc) >> 3;
-	obj    = ((1<<2) & jsb->misc) >> 2;
-	shift  = ((3<<0) & jsb->misc) >> 0;
-	ch = jsb->ch;
-	bt = jsb->bt;
+	if(jsb->outb != JSB_INT_EOF){
+		assert(jsb->outb != 0xc0);
+		if(dstlen)
+			dst[dstpos++] = jsb->outb;
+		else
+			return JSB_OK;
+		*(uint8_t *)&jsb->outb = JSB_INT_EOF;
+	}
 
 	debug(("enter: %d\n", jsb->state));
 
 BEGIN(jsb->state):
 	JUMP(value);
 
+F(yield): /* save state and suspend */
+	debug(("yield: %d\n", ret));
+	assert(jsb->obj  < 2);
+	assert(jsb->key  < 2);
+	assert(jsb->misc < 4);
+	*(size_t *)&jsb->avail_in -= srcpos;
+	*(size_t *)&jsb->avail_out -= dstpos;
+	*(uint8_t **)&jsb->next_in += srcpos;
+	*(uint8_t **)&jsb->next_out += dstpos;
+	jsb->total_in += srcpos;
+	jsb->total_out += dstpos;
+	return ret;
+
 J(escape):
 	NEXT(0);
-	if('u' == ch){
-		jsb->code = 0;
-		shift = 3;
-		JUMP(hex);
+	switch(jsb->ch){
+		default: ERROR;
+		case 't': jsb->ch = '\t'; break;
+		case 'n': jsb->ch = '\n'; break;
+		case 'r': jsb->ch = '\r'; break;
+		case 'f': jsb->ch = '\f'; break;
+		case 'b': jsb->ch = '\b'; break;
+		case '"': case '/': case '\\':
+			break;
+		case 'u':
+			jsb->code = 0;
+			jsb->misc = 3;
+			JUMP(hex);
 	}
-	else if('t' == ch) ch = '\t';
-	else if('n' == ch) ch = '\n';
-	else if('r' == ch) ch = '\r';
-	else if('f' == ch) ch = '\f';
-	else if('b' == ch) ch = '\b';
-	else if('"' != ch && '/' != ch && '\\' != ch)
-		ERROR;
 	ADDCH;
 	JUMP(string2);
 
+J(null):
+	jsb->code = 'u' | ('l'<<8) | ('l'<<16);
+	jsb->ch = JSB_NULL;
+	JUMP(const);
+
+J(false):
+	jsb->code = 'a' | ('l'<<8) | ('s'<<16) | ('e'<<24);
+	jsb->ch = JSB_FALSE;
+	JUMP(const);
+
+J(true):
+	jsb->code = 'r' | ('u'<<8) | ('e'<<16);
+	jsb->ch = JSB_TRUE;
+	JUMP(const);
+
+J(const):
+	assert(jsb->code);
+	ADDCH;
+	do{
+		NEXT(0);
+		if((jsb->code & 0xff) != jsb->ch)
+			ERROR;
+	}while(jsb->code >>= 8);
+	JUMP(more);
+
+J(pop):
+	APPEND(JSB_ARR_END - jsb->obj); /* JSB_ARR_END - 1 == JSB_OBJ_END */
+	if(!jsb->depth--) ERROR;
+	jsb->obj = (jsb->stack[jsb->depth >> 3] >> (jsb->depth & 7)) & 1;
+	assert(jsb->obj < 2);
+	jsb->key = 0;
+	JUMP(more);
+
 J(endnum):
-	if(JSB_INT_EOF != ch){
+	if(JSB_INT_EOF != jsb->ch){
 		debug(("srcpos--\n"));
 		srcpos--;
 	}
@@ -649,14 +592,14 @@ J(endnum):
 J(more):
 	if(!jsb->depth)
 		JUMP(done);
-	debug(("more: obj/key = %u/%u\n", obj, key));
+	debug(("more: obj/key = %u/%u\n", jsb->obj, jsb->key));
 	NEXT(1);
-	if(",:"[key] == ch){
-		if(key ^= obj)
+	if(PICK(jsb->key, ':', ',') == jsb->ch){
+		if(jsb->key ^= jsb->obj)
 			JUMP(key);
 		JUMP(value);
-	}else if("]}"[obj] == ch){
-		if(key)
+	}else if(PICK(jsb->obj, '}', ']') == jsb->ch){
+		if(jsb->key)
 			ERROR;
 		JUMP(pop);
 	}
@@ -665,7 +608,7 @@ J(more):
 J(key):
 	NEXT(1);
 J(key2):
-	if(ch != '"')
+	if(jsb->ch != '"')
 		ERROR;
 	APPEND(JSB_KEY);
 	if(0)
@@ -673,28 +616,48 @@ J(string):
 		APPEND(JSB_STR);
 J(string2):
 	NEXT(0);
-	if(JSB_INT_EOF == ch)
-		ERROR;
-	if('"' == ch){
+	if('"' == jsb->ch){
 		JUMP(more);
-	}else if('\\' == ch){
+	}else if('\\' == jsb->ch){
 		JUMP(escape);
-	}else if(ch >= 0x20 && ch < 0x80){
+	}else if(jsb->ch >= 0x20 && jsb->ch < 0x80){
 		ADDCH;
-	}else if((ch & 0xe0) == 0xc0 && (ch & 0x1f)){
-		jsb->code = ch & 0x1f;
-		shift = 1;
+	}else if((jsb->ch & 0xe0) == 0xc0 && (jsb->ch & 0x1f)){
+		jsb->code = jsb->ch & 0x1f;
+		jsb->misc = 1;
 		JUMP(unicode);
-	}else if((ch & 0xf0) == 0xe0){
-		jsb->code = ch & 0xf;
-		shift = 2;
+	}else if((jsb->ch & 0xf0) == 0xe0){
+		jsb->code = jsb->ch & 0xf;
+		jsb->misc = 2;
 		JUMP(unicode);
-	}else if((ch & 0xf8) == 0xf0){
-		jsb->code = ch & 0x7;
-		shift = 3;
+	}else if((jsb->ch & 0xf8) == 0xf0){
+		jsb->code = jsb->ch & 0x7;
+		jsb->misc = 3;
 		JUMP(unicode);
 	}else ERROR;
 	JUMP(string2);
+
+J(push):
+	APPEND(JSB_ARR - jsb->key); /* JSB_ARR - 1 == JSB_OBJ */
+	NEXT(1);
+	if(PICK(jsb->key, '}', ']') == jsb->ch){
+		APPEND(JSB_ARR_END - jsb->key); /* JSB_ARR_END - 1 == JSB_OBJ_END */
+		jsb->key = 0;
+		JUMP(more);
+	}
+	if(jsb->maxdepth == jsb->depth) ERROR;
+	{
+		const uint8_t tmp = 1 << (jsb->depth & 7);
+		if(jsb->obj)
+			jsb->stack[jsb->depth>>3] |= tmp;
+		else
+			jsb->stack[jsb->depth>>3] &= ~tmp;
+	}
+	jsb->depth++;
+	jsb->obj = jsb->key;
+	if(jsb->key)
+		JUMP(key2);
+	JUMP(value2);
 
 J(value):
 	debug(("value!\n"));
@@ -702,48 +665,33 @@ J(value):
 	if(0)
 J(value2):
 		debug(("value2!\n"));
-	if('"' == ch) JUMP(string);
-	else if(pdigit(ch)) JUMP(number);
-	else if('-' == ch) JUMP(sign);
-	else if('0' == ch) JUMP(zero);
-	else if('t' == ch) JUMP(true);
-	else if('f' == ch) JUMP(false);
-	else if('n' == ch) JUMP(null);
-	else if('{' == ch) key = 1;
-	else if('[' == ch) assert(!key);
-	else ERROR;
-	JUMP(push);
-
-J(push):
-	NEXT(1);
-	APPEND(JSB_ARR - key); /* JSB_ARR - 1 == JSB_OBJ */
-	if("]}"[key] == ch){
-		APPEND(JSB_ARR_END - key); /* JSB_ARR_END - 1 == JSB_OBJ_END */
-		key = 0;
-		JUMP(more);
+	switch(jsb->ch){
+		case '"': JUMP(string);
+		case '1': case '2': case '3':
+		case '4': case '5': case '6':
+		case '7': case '8': case '9':
+			JUMP(number);
+		case '-': JUMP(sign);
+		case '0': JUMP(zero);
+		case 't': JUMP(true);
+		case 'f': JUMP(false);
+		case 'n': JUMP(null);
+		case '{':
+		case '[':
+			if(jsb->key)
+		default:
+				ERROR;
+			jsb->key = (jsb->ch == '{');
+			JUMP(push);
 	}
-	STASH(obj);
-	obj = key;
-	jsb->depth++;
-	if(key)
-		JUMP(key2);
-	JUMP(value2);
-
-J(pop):
-	APPEND(JSB_ARR_END - obj); /* JSB_ARR_END - 1 == JSB_OBJ_END */
-	obj = UNSTASH;
-	assert(obj < 2);
-	key = 0;
-	jsb->depth--;
-	JUMP(more);
 
 J(sign):
 	APPEND(JSB_NUM);
 	ADDCH;
 	NEXT(0);
-	if(pdigit(ch))
+	if(pdigit(jsb->ch))
 		JUMP(number2);
-	if('0' == ch)
+	if('0' == jsb->ch)
 		JUMP(zero2);
 	ERROR;
 
@@ -752,103 +700,79 @@ J(number):
 J(number2):
 	ADDCH;
 	NEXT(0);
-	if(digit(ch))
+	if(digit(jsb->ch))
 		JUMP(number2);
-	if('.' == ch)
+	if('.' == jsb->ch)
 		JUMP(decimal);
-	if('e' == ch || 'E' == ch)
-		JUMP(exponent);
-	JUMP(endnum);
+	JUMP(expchk);
 
 J(zero):
 	APPEND(JSB_NUM);
 J(zero2):
 	ADDCH;
 	NEXT(0);
-	if('.' == ch)
+	if('.' == jsb->ch)
 		JUMP(decimal);
-	if('e' == ch || 'E' == ch)
-		JUMP(exponent);
-	JUMP(endnum);
+	JUMP(expchk);
 
 J(decimal):
 	ADDCH;
 	NEXT(0);
-	if(likely(digit(ch)))
+	if(digit(jsb->ch))
 		JUMP(decimal_more);
 	ERROR;
 
 J(decimal_more):
 	ADDCH;
 	NEXT(0);
-	if(digit(ch))
+	if(digit(jsb->ch))
 		JUMP(decimal_more);
-	if('e' == ch || 'E' == ch)
+	JUMP(expchk);
+
+J(expchk):
+	if('e' == jsb->ch || 'E' == jsb->ch)
 		JUMP(exponent);
 	JUMP(endnum);
 
 J(exponent):
 	APPEND('e');
 	NEXT(0);
-	shift = ('-' == ch);
-	if('-' == ch || '+' == ch)
+	jsb->misc = ('-' == jsb->ch);
+	if('-' == jsb->ch || '+' == jsb->ch)
 		NEXT(0);
-	if(pdigit(ch))
+	if(pdigit(jsb->ch))
 		JUMP(exponent_more);
-	else if(ch == '0')
+	else if(jsb->ch == '0')
 		JUMP(exponent_zero);
 	ERROR;
 
 J(exponent_zero):
-	do{
-		NEXT(0);
-	}while(ch == '0');
-	if(digit(ch))
+	NEXT(0);
+	if(jsb->ch == '0')
+		JUMP(exponent_zero);
+	if(digit(jsb->ch))
 		JUMP(exponent_more);
 	APPEND('0');
 	JUMP(endnum);
 
 J(exponent_more):
-	if(shift)
+	if(jsb->misc)
 		APPEND('-');
 
 J(exponent_more2):
 	ADDCH;
 	NEXT(0);
-	if(digit(ch))
+	if(digit(jsb->ch))
 		JUMP(exponent_more2);
 	JUMP(endnum);
-
-J(null):
-	jsb->code = 'u' | ('l'<<7) | ('l'<<14);
-	bt = JSB_NULL;
-	JUMP(const);
-
-J(false):
-	jsb->code =	'a' | ('l'<<7) | ('s'<<14) | ('e'<<21);
-	bt = JSB_FALSE;
-	JUMP(const);
-
-J(true):
-	jsb->code = 'r' | ('u'<<7) | ('e'<<14);
-	bt = JSB_TRUE;
-	JUMP(const);
-
-J(const):
-	do{
-		NEXT(0);
-		if((jsb->code & 0x7f) != ch) ERROR;
-	}while(jsb->code >>= 7);
-	APPEND(bt);
-	JUMP(more);
 
 J(unicode):
 	ADDCH;
 	NEXT(0);
-	if((ch & 0xc0) != 0x80)
+	if((jsb->ch & 0xc0) != 0x80)
 		ERROR;
-	jsb->code = (jsb->code << 6) | (ch & 0x3f);
-	if(--shift)
+	jsb->code = (jsb->code << 6) | (jsb->ch & 0x3f);
+	if(--jsb->misc)
 		JUMP(unicode);
 	if(jsb->code > 0x10ffff || (jsb->code >= 0xd800 && jsb->code < 0xe000))
 		ERROR;
@@ -857,260 +781,252 @@ J(unicode):
 
 J(hexb):
 	NEXT(0);
-	if('\\' != ch)
+	if('\\' != jsb->ch)
 		ERROR;
 	NEXT(0);
-	if('u' != ch)
+	if('u' != jsb->ch)
 		ERROR;
 	jsb->code <<= 16;
-	shift = 3;
+	jsb->misc = 3;
 	JUMP(hex);
 
 J(hex):
 	NEXT(0);
-	tmp = hex(ch);
-	if(tmp > 0xf)
-		ERROR;
-	jsb->code |= tmp << (4 * shift);
-	if(shift){
-		shift--;
-		JUMP(hex);
-	}
-	/* deal w/ UTF-16 surrogate pairs - https://en.wikipedia.org/wiki/UTF-16 */
-	tmp = jsb->code & 0xfc00;
-	if(jsb->code < 0x10000){
-		if(0xdc00 == tmp)
+	{
+		uint32_t tmp = hex(jsb->ch);
+		if(tmp > 0xf)
 			ERROR;
-		if(0xd800 == tmp)
-			JUMP(hexb);
-	}else{
-		if(0xdc00 != tmp)
-			ERROR;
-		jsb->code = 0x10000 + ((jsb->code & 0x3ff0000) >> 6) + (jsb->code & 0x3ff);
+		jsb->code |= tmp << (4 * jsb->misc);
+		if(jsb->misc){
+			jsb->misc--;
+			JUMP(hex);
+		}
+		/* deal w/ UTF-16 surrogate pairs - https://en.wikipedia.org/wiki/UTF-16 */
+		tmp = jsb->code & 0xfc00;
+		if(jsb->code < 0x10000){
+			if(0xdc00 == tmp)
+				ERROR;
+			if(0xd800 == tmp)
+				JUMP(hexb);
+		}else{
+			if(0xdc00 != tmp)
+				ERROR;
+			jsb->code = 0x10000 + ((jsb->code & 0x3ff0000) >> 6) + (jsb->code & 0x3ff);
+		}
 	}
 	if(jsb->code < 0x80){
-		ch = jsb->code;
-		ADDCH;
 	}else if(jsb->code < (0x1<<11)){
-		ch = 0xc0 | (jsb->code >> 6);
-		ADDCH;
-		ch = 0x80 | (jsb->code & 0x3f);
-		ADDCH;
+		jsb->code = 0x80c0 | (jsb->code >> 6) | ((jsb->code & 0x3f)<<8);
 	}else if(jsb->code < (0x1<<16)){
-		ch = 0xe0 | (jsb->code >> 12);
-		ADDCH;
-		ch = 0x80 | ((jsb->code >> 6) & 0x3f);
-		ADDCH;
-		ch = 0x80 | (jsb->code & 0x3f);
-		ADDCH;
+		jsb->code = 0x8080e0 | (jsb->code >>12) | ((jsb->code & 0xfc0) << 2) | ((jsb->code & 0x3f) << 16);
 	}else if(jsb->code < (0x11<<16)){
-		ch = 0xf0 | (jsb->code >> 18);
-		ADDCH;
-		ch = 0x80 | ((jsb->code >> 12) & 0x3f);
-		ADDCH;
-		ch = 0x80 | ((jsb->code >> 6) & 0x3f);
-		ADDCH;
-		ch = 0x80 | (jsb->code & 0x3f);
-		ADDCH;
+		jsb->code = 0x808080f0 | (jsb->code >> 18) | ((jsb->code & 0x3f000) >> 4) | ((jsb->code & 0xfc0) << 10) | ((jsb->code & 0x3f)<<24);
 	}else ERROR;
+	do{
+		APPEND(jsb->code);
+	}while(jsb->code >>= 8);
 	JUMP(string2);
 
 J(error): /* parsing failed */
-	debug(("error!\n"));
-	while(1)
-		YIELD(JSB_ERROR);
+	debug(("error: line %d\n", jsb->code));
+	while(1) YIELD(JSB_ERROR);
 J(done):
 	APPEND(JSB_DOC_END);
-	YIELD(dstpos);
 	NEXT(1);
-	if(JSB_INT_EOF == ch)
-		while(1)
-			YIELD(JSB_EOF);
-	if(jsb->flags & JSB_LINES)
-		JUMP(value2);
-	ERROR;
-F(yield): /* save state and suspend */
-	debug(("yield: %d\n", ret));
-	jsb->bt = bt;
-	jsb->ch = ch;
-	assert(obj   < 2);
-	assert(key   < 2);
-	assert(shift < 4);
-	jsb->misc = (key << 3) | (obj << 2) | (shift << 0);
-	jsb->stack = stack;
-	jsb->srcpos = srcpos;
-	jsb->dstpos = dstpos;
-	return ret;
+	if(jsb->flags & JSB_LINES){
+/*		YIELD(JSB_OK); */
+		if(JSB_INT_EOF != jsb->ch)
+			JUMP(value2);
+	}else{
+		if(jsb->ch != JSB_INT_EOF)
+			srcpos--;
+	}
+	while(1)
+		YIELD(JSB_DONE);
 END;
 }
 
-#undef NEXT
-#define NEXT do{                             \
-	debug(("next!\n"));                      \
-	assert(JSB_INT_EOF != ch);               \
-	do{                                      \
-		if(srcpos != srclen){                \
-			ch = src[srcpos++];              \
-			if(0xc0 == ch || 0xc1 == ch)     \
-				ERROR;                       \
-			debug(("ch: %02x\n", ch));       \
-			break;                           \
-		}else if(JSB_INT_EOF != ch){         \
-			YIELD(JSB_FILL);                 \
-		}else{                               \
-			break;                           \
-		}                                    \
-	}while(1);                               \
-}while(0)
-
-#undef ERROR
-#define ERROR do{ code = __LINE__; JUMP(error); }while(0)
-
-static size_t _jsb_dump(jsb_t *jsb, uint8_t * const dst, const uint8_t * const src){
+PRIVATE size_t __attribute__((noinline)) _jsb_dump(jsb_t *jsb){
 	size_t ret;
 
-	/* clone, but no need to restore read-only ptr */
-	const size_t srclen = jsb->srclen;
+	size_t srcpos = 0;
+	size_t dstpos = 0;
 
-	size_t dstpos, srcpos, depth, stack;
-	uint32_t code;
-	uint8_t pch, ch, bt;
+	/* clone, but no need to restore read-only ptr */
+	const int eof = jsb->flags & JSB_EOF;
+	const size_t srclen = jsb->avail_in;
+	const size_t dstlen = jsb->avail_out;
+	const uint8_t * const src = jsb->next_in;
+	uint8_t * const dst = jsb->next_out;
 
 	const uint32_t ascii = jsb->flags & JSB_ASCII;
 
-	debug(("jsb_dump(%p, %p, %p)\n", (void *)jsb, dst, src));
-	_jsb_eat(jsb, dst);
+	debug(("jsb_dump(%p, %d)\n", (void *)jsb, eof));
 
-	/* clone on entry & restore on yield */
-	dstpos = jsb->dstpos;
-	srcpos = jsb->srcpos;
-	depth = jsb->depth;
-	stack = jsb->stack;
-	code = jsb->code;
-	pch = jsb->misc;
-	ch = jsb->ch;
-	bt = jsb->bt;
+	if(jsb->outb != JSB_INT_EOF){
+		assert(jsb->outb != 0xc0);
+		if(dstlen)
+			dst[dstpos++] = jsb->outb;
+		else
+			return JSB_OK;
+		*(uint8_t *)&jsb->outb = JSB_INT_EOF;
+	}
+
+	debug(("enter: %d\n", jsb->state));
 
 BEGIN(jsb->state):
-	NEXT;
+	NEXT(0);
 	JUMP(start);
-	do{
-		if(JSB_ARR_END == ch || JSB_OBJ_END == ch){
-			pch = 0;
-			bt = "]}"[ch&1];
-			if(!depth--) ERROR;
-			JUMP(append);
-		}else if(JSB_KEY == pch){
-			APPEND(':');
-		}else if(JSB_ARR != pch && JSB_OBJ != pch){
-			APPEND(',');
-		}
-J(start):
-		code = 0;
-		pch = ch;
-		if(JSB_KEY == ch || JSB_STR == ch){
-			APPEND('"');
-			NEXT;
-			while(likely(ch < 0xf5)){
-				if(ch < 0x20 || ch == '"' || ch == '\\'){
-					APPEND('\\');
-					if('"' == ch || '\\' == ch) (void)ch;
-					else if('\t' == ch) ch = 't';
-					else if('\n' == ch) ch = 'n';
-					else if('\r' == ch) ch = 'r';
-					else if('\f' == ch) ch = 'f';
-					else if('\b' == ch) ch = 'b';
-					else{
-						APPEND('u');
-						APPEND('0');
-						APPEND('0');
-						APPEND(nibble(ch>>4));
-						ch = nibble(ch);
-					}
-				}else if(ascii && (ch & 0x80)){
-					if((ch & 0xf8) == 0xf0){
-						code = ch & 0x7;
-						goto _3;
-					}
-					if((ch & 0xf0) == 0xe0){
-						code = ch & 0xf;
-						goto _2;
-					}
-					assert((ch & 0xe0) == 0xc0);
-					code = ch & 0x1f;
-					goto _1;
-					_3: NEXT; assert((ch & 0xc0) == 0x80); code <<= 6; code |= ch ^ 0x80;
-					_2: NEXT; assert((ch & 0xc0) == 0x80); code <<= 6; code |= ch ^ 0x80;
-					_1: NEXT; assert((ch & 0xc0) == 0x80); code <<= 6; code |= ch ^ 0x80;
-					assert(code < 0x110000);
-					APPEND('\\');
-					APPEND('u');
-					if(code < 0x10000){
-						APPEND(nibble(code >> 12));
-						APPEND(nibble(code >> 8));
-						APPEND(nibble(code >> 4));
-					}else{
-						code -= 0x10000;
-						APPEND('d');
-						APPEND(nibble((code >> 18) | 0x8));
-						APPEND(nibble(code >> 14));
-						APPEND(nibble(code >> 10));
-						APPEND('\\');
-						APPEND('u');
-						APPEND('d');
-						APPEND(nibble((code >> 8) | 0xc));
-						APPEND(nibble(code >> 4));
-					}
-					ch = nibble(code);
-				}
-				ADDCH;
-				NEXT;
-			}
-			APPEND('"');
-			continue;
-		}else if(JSB_NUM == ch){
-			NEXT;
-			while(likely(ch < 0xf5)){
-				ADDCH;
-				NEXT;
-			}
-			continue;
-		}else if((JSB_ARR == ch || JSB_OBJ == ch)){
-			bt = "[{"[ch&1];
-			if(!++depth) ERROR;
-		}else if(JSB_TRUE == ch){
-			bt = 't';
-			code = 'r' | ('u'<<7) | ('e'<<14);
-		}else if(JSB_FALSE == ch){
-			bt = 'f';
-			code = 'a' | ('l'<<7) | ('s'<<14) | ('e'<<21);
-		}else if(JSB_NULL == ch){
-			bt = 'n';
-			code = 'u' | ('l'<<7) | ('l'<<14);
-		}else{
+
+F(yield): /* save state and suspend */
+	debug(("yield: %d\n", ret));
+	*(size_t *)&jsb->avail_in -= srcpos;
+	*(size_t *)&jsb->avail_out -= dstpos;
+	*(uint8_t **)&jsb->next_in += srcpos;
+	*(uint8_t **)&jsb->next_out += dstpos;
+	jsb->total_in += srcpos;
+	jsb->total_out += dstpos;
+	return ret;
+
+J(pop):
+	jsb->depth--;
+	jsb->misc = 0;
+	if(0)
+J(push):
+		if(!++jsb->depth)
 			ERROR;
+	ADDCH;
+J(nextch):
+	NEXT(0);
+J(next):
+	if(!jsb->depth)
+		JUMP(done);
+	if(JSB_ARR_END == jsb->ch){
+		jsb->ch = ']';
+		JUMP(pop);
+	}else if(JSB_OBJ_END == jsb->ch){
+		jsb->ch = '}';
+		JUMP(pop);
+	}else if(JSB_KEY == jsb->misc){
+		APPEND(':');
+	}else if(JSB_ARR != jsb->misc && JSB_OBJ != jsb->misc){
+		APPEND(',');
+	}
+
+J(start):
+	jsb->code = 0;
+	jsb->misc = jsb->ch;
+	if(JSB_NUM == jsb->ch){
+		while(1){
+			NEXT(0);
+			if(jsb->ch > 0xf4)
+				JUMP(next);
+			ADDCH;
 		}
-J(append):
-		APPEND(bt);
-		while(code){
-			APPEND(code & 0x7f);
-			code >>= 7;
+	}else if(JSB_ARR == jsb->ch){
+		jsb->ch = '[';
+		JUMP(push);
+	}else if(JSB_OBJ == jsb->ch){
+		jsb->ch = '{';
+		JUMP(push);
+	}else if(JSB_KEY == jsb->ch || JSB_STR == jsb->ch){
+		APPEND('"');
+		JUMP(string);
+	}else if(JSB_TRUE == jsb->ch){
+		jsb->ch = 't';
+		jsb->code = 'r' | ('u'<<8) | ('e'<<16);
+	}else if(JSB_FALSE == jsb->ch){
+		jsb->ch = 'f';
+		jsb->code = 'a' | ('l'<<8) | ('s'<<16) | ('e'<<24);
+	}else if(JSB_NULL == jsb->ch){
+		jsb->ch = 'n';
+		jsb->code = 'u' | ('l'<<8) | ('l'<<16);
+	}else{
+		ERROR;
+	}
+	ADDCH;
+	while(jsb->code){
+		APPEND(jsb->code);
+		jsb->code >>= 8;
+	}
+	JUMP(nextch);
+
+J(string):
+	NEXT(0);
+	if(jsb->ch > 0xf4){
+		APPEND('"');
+		JUMP(next);
+	}else if(jsb->ch >= 0x20 && jsb->ch != '"' && jsb->ch != '\\' && (!ascii || jsb->ch < 0x80)){
+		ADDCH;
+		JUMP(string);
+	}else if(jsb->ch < 0x80){
+		APPEND('\\');
+		if('"' == jsb->ch || '\\' == jsb->ch) (void)jsb->ch;
+		else if('\t' == jsb->ch) jsb->ch = 't';
+		else if('\n' == jsb->ch) jsb->ch = 'n';
+		else if('\r' == jsb->ch) jsb->ch = 'r';
+		else if('\f' == jsb->ch) jsb->ch = 'f';
+		else if('\b' == jsb->ch) jsb->ch = 'b';
+		else{
+			APPEND('u');
+			APPEND('0');
+			APPEND('0');
+			APPEND(nibble(jsb->ch>>4));
+			jsb->ch = nibble(jsb->ch);
 		}
-		NEXT;
-	}while(depth);
+	}else{
+		if((jsb->ch & 0xf8) == 0xf0){
+			jsb->code = jsb->ch & 0x7;
+			goto _3;
+		}
+		if((jsb->ch & 0xf0) == 0xe0){
+			jsb->code = jsb->ch & 0xf;
+			goto _2;
+		}
+		assert((jsb->ch & 0xe0) == 0xc0);
+		jsb->code = jsb->ch & 0x1f;
+		goto _1;
+		_3: NEXT(0); assert((jsb->ch & 0xc0) == 0x80); jsb->code <<= 6; jsb->code |= jsb->ch ^ 0x80;
+		_2: NEXT(0); assert((jsb->ch & 0xc0) == 0x80); jsb->code <<= 6; jsb->code |= jsb->ch ^ 0x80;
+		_1: NEXT(0); assert((jsb->ch & 0xc0) == 0x80); jsb->code <<= 6; jsb->code |= jsb->ch ^ 0x80;
+		assert(jsb->code < 0x110000);
+		APPEND('\\');
+		APPEND('u');
+		if(jsb->code < 0x10000){
+			APPEND(nibble(jsb->code >> 12));
+			APPEND(nibble(jsb->code >> 8));
+			APPEND(nibble(jsb->code >> 4));
+		}else{
+			jsb->code -= 0x10000;
+			APPEND('d');
+			APPEND(nibble((jsb->code >> 18) | 0x8));
+			APPEND(nibble(jsb->code >> 14));
+			APPEND(nibble(jsb->code >> 10));
+			APPEND('\\');
+			APPEND('u');
+			APPEND('d');
+			APPEND(nibble((jsb->code >> 8) | 0xc));
+			APPEND(nibble(jsb->code >> 4));
+		}
+		jsb->ch = nibble(jsb->code);
+	}
+	ADDCH;
+	JUMP(string);
+
+J(done):
 	/* parsing successful */
 	if(jsb->flags & JSB_LINES)
 		APPEND('\n');  /* append a newline */
 	APPEND(0);       /* and null terminate */
 	dstpos--; /* but don't include in output */
 	debug(("done!\n"));
-	YIELD(dstpos);
 	if(jsb->flags & JSB_LINES){
-again:
-		NEXT;
-		switch(ch){
+/*		YIELD(JSB_OK); */
+J(again):
+		NEXT(0);
+		switch(jsb->ch){
 			case JSB_DOC_END:
-				goto again;
+				JUMP(again);
 			case JSB_NULL:
 			case JSB_FALSE:
 			case JSB_TRUE:
@@ -1121,59 +1037,63 @@ again:
 			case JSB_OBJ:
 				JUMP(start);
 			default:
+				srcpos--;
+				/* fall through */
+			case JSB_INT_EOF:
 				break;
 		}
 	}
 	while(1)
-		YIELD(JSB_EOF);
+		YIELD(JSB_DONE);
 J(error): /* parsing failed */
-	debug(("error!\n"));
+	debug(("error: line %d\n", jsb->code));
 	while(1) YIELD(JSB_ERROR);
-F(yield): /* save state and suspend */
-	debug(("yield: %d\n", ret));
-	jsb->bt = bt;
-	jsb->ch = ch;
-	jsb->misc = pch;
-	jsb->code = code;
-	jsb->stack = stack;
-	jsb->depth = depth;
-	jsb->srcpos = srcpos;
-	jsb->dstpos = dstpos;
-	return ret;
 END;
 }
 
-static  size_t _jsb_update(jsb_t *jsb, void * const dst, const void * const src);
-JSB_API size_t  jsb_update(jsb_t *jsb, void * const dst, const void * const src){ return _jsb_update(jsb, dst, src); }
-static  size_t _jsb_update(jsb_t *jsb, void * const dst, const void * const src){
-	return (jsb->flags & JSB_REVERSE) ? _jsb_dump(jsb, dst, src) : _jsb_load(jsb, dst, src);
+PRIVATE size_t _jsb_update(jsb_t *jsb){
+	typedef size_t (*jsb_func)(jsb_t *);
+	static const jsb_func func[] = { _jsb_load, _jsb_dump };
+	return func[(jsb->flags & JSB_REVERSE) == JSB_REVERSE](jsb);
 }
 
-JSB_API size_t jsb(void *dst, size_t dstlen, const void *src, size_t srclen, size_t flags){
-	jsb_t jsb;
-	size_t ret = 0, rv;
-	size_t r;
-	_jsb_init(&jsb, dstlen, flags & ~(size_t)JSB_SIZE);
-	r = _jsb_srclen(&jsb, srclen);
-	assert(0 == r);
-	(void)r;
-again:
-	rv = _jsb_update(&jsb, dst, src);
-	switch(rv){
-		default:
-			ret += rv;
-			goto again;
-		case JSB_FILL:
-			r = _jsb_srclen(&jsb, 0);
-			assert(0 == r);
-			(void)r;
-			goto again;
-		case JSB_FULL:
-		case JSB_ERROR:
-			ret = JSB_ERROR;
-			/* fall through */
-		case JSB_EOF:
-			break;
+JSB_API size_t jsb_update(jsb_t *jsb){
+	return _jsb_update(jsb);
+}
+
+JSB_API void jsb_eof(jsb_t *jsb){
+	debug(("eof\n"));
+	*(uint32_t *)&jsb->flags |= JSB_EOF;
+}
+
+JSB_API size_t jsb(void *dst, size_t dstlen, const void *src, size_t srclen, uint32_t flags, size_t maxdepth){
+	size_t md, ret;
+#ifdef __TINYC__
+	/* tcc doesn't provide alloca(), at least with -nostdlib -fno-builtin */
+	jsb_unit_t ju[_jsb_units(maxdepth)];
+	jsb_t *jsb = (jsb_t *)ju;
+	size_t jsz = sizeof(ju);
+#else
+	/* c89 doesn't support dynamically sized arrays */
+	size_t jsz = sizeof(jsb_unit_t) * _jsb_units(maxdepth);
+	jsb_t *jsb = alloca(jsz);
+#endif
+	md = _jsb_init(jsb, flags | JSB_EOF, jsz);
+	(void)md;
+	jsb->next_in = src;
+	jsb->next_out = dst;
+	jsb->avail_in = srclen;
+	jsb->avail_out = dstlen;
+	ret = _jsb_update(jsb);
+	if(ret != JSB_DONE){
+		debug(("not done: %zu\n", ret));
+		ret = JSB_ERROR;
+	}else if(jsb->avail_in){
+		debug(("leftovers: %zu\n", jsb->avail_in));
+		ret = JSB_ERROR;
+	}else{
+		ret = jsb->total_out;
+		debug(("done: %zu\n", ret));
 	}
 	return ret;
 }
@@ -1195,9 +1115,9 @@ JSB_API size_t jsb_analyze(const void *base, size_t offset, size_t *idx, size_t 
 	return r;
 }
 
-static  uint8_t _jsb_type(const void *base, size_t offset);
+PRIVATE uint8_t _jsb_type(const void *base, size_t offset);
 JSB_API uint8_t  jsb_type(const void *base, size_t offset){ return _jsb_type(base, offset); }
-static  uint8_t _jsb_type(const void *base, size_t offset){
+PRIVATE uint8_t _jsb_type(const void *base, size_t offset){
 	uint8_t t = *(offset + (uint8_t *)base);
 	switch(t){
 		default: t = 0; /* fall through */
@@ -1238,7 +1158,7 @@ JSB_API size_t jsb_bool(const void *base, size_t offset){
 }
 
 JSB_API size_t  jsb_size(const void *base, size_t offset, const size_t *meta){ return _jsb_size(base, offset, meta); }
-static  size_t _jsb_size(const void *base, size_t offset, const size_t *meta){
+PRIVATE size_t _jsb_size(const void *base, size_t offset, const size_t *meta){
 	const uint8_t * const v = offset + (uint8_t *)base;
 	const uint8_t * c = v;
 	size_t depth = 1;
@@ -1363,7 +1283,7 @@ JSB_API size_t jsb_obj_get(const void *base, size_t offset, const size_t *meta, 
 }
 
 /* return position of first slot who's record sorts >= than provided key, or n if it could just be appended */
-static size_t match_find(const size_t *keylens, const size_t *indexes, const void **keys, size_t n, const void *key, size_t keylen, int mode){
+PRIVATE size_t match_find(const size_t *keylens, const size_t *indexes, const void **keys, size_t n, const void *key, size_t keylen, int mode){
 	size_t i, lo = 0, hi = n, mid, ret = n;
 	mode = !!mode;
 	while(lo < hi){
@@ -1387,7 +1307,7 @@ debug(("slot %zu\n", ret));
 	return ret;
 }
 
-JSB_API void jsb_prepare(size_t *keyinfo, const void *_keys, size_t flags){
+JSB_API void jsb_prepare(size_t *keyinfo, const void *_keys, uint32_t flags){
 	const size_t n = keyinfo[0];
 	const void **keys = (void *)_keys;
 	size_t * const keylens = keyinfo + 1;
@@ -1483,13 +1403,13 @@ typedef struct {
 	const uint8_t *fpart_end;
 	const uint8_t *epart;
 	const uint8_t *epart_end;
-	uint8_t negative:1;
-	uint8_t e_negative:1;
-	uint8_t zero:1;
+	unsigned negative:1;
+	unsigned e_negative:1;
+	unsigned zero:1;
 } ns_t;
 
 /* harvest boundaries of parts of scientific-notation-style numbers */
-static void numwalk(const uint8_t *s, ns_t *ns){
+PRIVATE void numwalk(const uint8_t *s, ns_t *ns){
 	ns->ipart = ns->ipart_end = 0;
 	ns->fpart = ns->fpart_end = 0;
 	ns->epart = ns->epart_end = 0;
@@ -1528,7 +1448,7 @@ static void numwalk(const uint8_t *s, ns_t *ns){
 	}
 }
 
-static const uint8_t *step(int *r, ssize_t *d, int m, const uint8_t *ea, const uint8_t *eb){
+PRIVATE const uint8_t *step(int *r, ssize_t *d, int m, const uint8_t *ea, const uint8_t *eb){
 	/* convert next least significant digit to numeric, else zero if we've run out */
 	int x = (ea != eb) ? (*--eb - '0') * m : 0;
 	int y = *d % 10; /* grab last delta digit: [-9 .. 9]               */
@@ -1539,7 +1459,7 @@ static const uint8_t *step(int *r, ssize_t *d, int m, const uint8_t *ea, const u
 	return eb;       /* return possibly changed end-of-exponent marker */
 }
 
-static const uint8_t *istep(int *r, const uint8_t *c, ns_t *ns){
+PRIVATE const uint8_t *istep(int *r, const uint8_t *c, ns_t *ns){
 	if(c == ns->ipart_end)   /* jump from end of integer to fractional */
 		c = ns->fpart;       /* fpart may equal fpart_end              */
 	if(c == ns->fpart_end)   /* pad with trailing zero if at end       */
@@ -1550,7 +1470,7 @@ static const uint8_t *istep(int *r, const uint8_t *c, ns_t *ns){
 }
 
 /* numerically compare two stringified json-style numbers */
-int numcmp(const uint8_t *n0, const uint8_t *n1){
+PRIVATE int numcmp(const uint8_t *n0, const uint8_t *n1){
 	ns_t ns0, ns1;
 	ssize_t d0, d1;
 	int r = 0, m0, m1, r0, r1;

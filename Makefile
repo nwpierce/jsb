@@ -12,7 +12,7 @@ distclean=0
 
 # optimization level, LTO, and C standard
 opt=3
-lto=1
+lto=0
 std=c89
 
 
@@ -148,7 +148,7 @@ subtest: jsb JSONTestSuite/README.md Makefile $(addsuffix _test,$(TESTS))
 	@echo >&2
 
 %_test: %
-	@./jsb -v < "$*" >/dev/null 2>/dev/null; printf "%d\t%s\n" $$? "$*"
+	@./jsb -m 1024 -v < "$*" >/dev/null 2>/dev/null; printf "%d\t%s\n" $$? "$*"
 	@printf . >&2
 endif
 
@@ -165,9 +165,8 @@ ifneq (,$(filter-out 0,$(clean) $(distclean)))
 ifneq (0,$(distclean))
 clean_targets+=$(distclean_targets)
 endif
-# convert clean targets for use by find: -name foo -o -name bar -o -name baz
-find_names=-name $(subst $(eval) , -o -name ,$(sort $(clean_targets)))
-$(shell find . -mindepth 1 -maxdepth 1 \( $(find_names) \) -exec rm -rf {} + -exec printf 'removed: %s\n' {} + >&2)
+$(shell for x in $(wildcard $(clean_targets)); do rm -rf $$x && echo removed: $$x; done >&2)
 endif
 
-.PHONY: test subtest clean distclean
+.PHONY: test subtest clean distclean check
+.PRECIOUS: check

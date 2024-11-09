@@ -6,11 +6,11 @@ Libjsb streams JSON to/from a friendly compact traversable binary representation
 
 * [fast](#benchmarks)
 * incremental
+	* zlib-ish interface
 * embeddable
 	* no runtime dependencies
-	* no internal memory allocations
-* no imposed maximum nested object/array depth
-	* borrows tail end of provided output buffer to track state (one byte per level of depth)
+	* no internal heap memory allocations
+* configurable maximum nested object/array depth
 * maintains object key order
 * strict input JSON checking
 	* restricts UTF-8 codepoints to ranges:
@@ -58,48 +58,14 @@ jsb -vt < foo.bin
 
 Linux - 3.3GHz i3-2120:
 
-| compiler   | json -> binary | binary -> json |
-|------------|----------------|----------------|
-| gcc 7.4.0  | 485 mb/sec     | 575 mb/sec     |
-| gcc 8.3.0  | 430 mb/sec     | 565 mb/sec     |
-| gcc 9.3.0  | 445 mb/sec     | 410 mb/sec     |
-| gcc 10.2.1 | 475 mb/sec     | 405 mb/sec     |
-| gcc 11.3.0 | 420 mb/sec     | 525 mb/sec     |
-| gcc 12.2.0 | 420 mb/sec     | 555 mb/sec     |
-
-Linux - 1.2 (3.8 Turbo boost) GHz i7-1060NG7 (via qemu):
-
-| compiler   | json -> binary | binary -> json |
-|------------|----------------|----------------|
-| gcc 7.4.0  | 780 mb/sec     | 935 mb/sec     |
-| gcc 8.3.0  | 685 mb/sec     | 895 mb/sec     |
-| gcc 9.3.0  | 760 mb/sec     | 610 mb/sec     |
-| gcc 10.2.0 | 765 mb/sec     | 580 mb/sec     |
-| gcc 11.3.0 | 645 mb/sec     | 630 mb/sec     |
-| gcc 12.2.0 | 705 mb/sec     | 825 mb/sec     |
-
-macOS - 1.2 (3.8 Turbo boost) GHz i7-1060NG7:
-
-| compiler   | json -> binary | binary -> json |
-|------------|----------------|----------------|
-| clang 15   | 570 mb/sec     | 485 mb/sec     |
-
-Linux - Apple M1 (via qemu):
-
-| compiler   | json -> binary | binary -> json |
-|------------|----------------|----------------|
-| gcc 7.4.0  | 985 mb/sec     | 1145 mb/sec    |
-| gcc 8.3.0  | 1030 mb/sec    | 955 mb/sec     |
-| gcc 9.3.0  | 835 mb/sec     | 1000 mb/sec    |
-| gcc 10.2.1 | 880 mb/sec     | 1015 mb/sec    |
-| gcc 11.3.0 | 985 mb/sec     | 1135 mb/sec    |
-| gcc 12.2.0 | 970 mb/sec     | 1105 mb/sec    |
-
-macOS - Apple M1:
-
-| compiler   | json -> binary | binary -> json |
-|------------|----------------|----------------|
-| clang 15   | 750 mb/sec     | 950 mb/sec     |
+| OS    | CPU                   | compiler   | json -> binary | binary -> json | extra cflags                  |
+|-------|-----------------------|------------|----------------|----------------|-------------------------------|
+| Linux | i3-2120@3.3ghz        | gcc 12.2.0 | 452 mb/sec     | 559 mb/sec     |                               |
+| Linux | i7-1060NG7@1.2/3.8ghz | gcc 12.2.0 | 701 mb/sec     | 953 mb/sec     |                               |
+| Linux | i7-1060NG7@1.2/3.8ghz | clang 16.0 | 542 mb/sec     | 600 mb/sec     |                               |
+| Linux | i7-1060NG7@1.2/3.8ghz | clang 16.0 | 738 mb/sec     | 806 mb/sec     | -mllvm -align-all-functions=6 |
+| macOS | i7-1060NG7@1.2/3.8ghz | clang 16.0 | 520 mb/sec     | 542 mb/sec     |                               |
+| macOS | Apple M1              | clang 16.0 | 907 mb/sec     | 966 mb/sec     |                               |
 
 ## Binary representation:
 

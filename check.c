@@ -46,40 +46,28 @@ subchk_t subs[] = {
 };
 
 static size_t _jsb_inc(char *dst, size_t dmax, const char *src, size_t slen, uint32_t flags){
-	size_t dlen = 0;
-	size_t rv, ret = 0;
 	jsb_t jsb;
-	int r;
-	r = jsb_init(&jsb, dlen, flags);
-	assert(0 == r);
-	r = jsb_srclen(&jsb, !!slen);
-	if(slen)
-		slen--;
-	assert(0 == r);
-again:
-	rv = jsb_update(&jsb, dst, src);
-	switch(rv){
-		default:
-			assert(!ret);
-			ret = rv;
-			goto again;
-		case JSB_FULL:
-			assert(dlen != dmax);
-			rv = jsb_dstlen(&jsb, dst, ++dlen);
-			assert(rv == dlen);
-			goto again;
-		case JSB_FILL:
-			r = jsb_srclen(&jsb, slen ? slen--,src++,1 : 0);
-			assert(0 == r);
-			goto again;
-		case JSB_ERROR:
-			ret = JSB_ERROR;
-			break;
-		case JSB_EOF:
-			break;
-	}
-	assert(ret <= JSB_SIZE_MAX);
-	return ret;
+	size_t rv;
+	jsb_init(&jsb, flags, sizeof(jsb));
+	jsb.next_in = (void *)src;
+	jsb.next_out = (void *)dst;
+	jsb.avail_out = dmax;
+	jsb.avail_in = 0;
+	do{
+		if(!jsb.avail_in){
+			if(slen)
+				jsb.avail_in++, slen--;
+			else
+				jsb_eof(&jsb);
+		}else if(!jsb.avail_out){
+			assert(dmax);
+			jsb.avail_out++;
+			dmax--;
+		}
+		rv = jsb_update(&jsb);
+	}while(JSB_OK == rv);
+	assert(rv == JSB_DONE);
+	return jsb.total_out;
 }
 
 static size_t jsb_inc(void *dst, size_t dmax, const void *src, size_t slen, uint32_t flags){
@@ -134,12 +122,13 @@ int main(void){
 		memset(txt, 0xc0, sizeof(txt));
 		memset(tmp, 0xc1, sizeof(tmp));
 		plen = strlen(pass[i]);
-		len = jsb(bin, sizeof(bin), pass[i], plen, 0);
+		len = jsb(bin, sizeof(bin), pass[i], plen, 0, -1);
 		assert(jsb_inc(tmp, sizeof(tmp), pass[i], plen, 0) == len);
 		assert(memcmp(bin, tmp, len) == 0);
 		assert(len);
 		blen = len;
-		len = jsb(txt, sizeof(txt), bin, blen, JSB_REVERSE);
+		len = jsb(txt, sizeof(txt), bin, blen, JSB_REVERSE, -1);
+		assert(JSB_ERROR != len);
 		assert(jsb_inc(tmp, sizeof(tmp), bin, blen, JSB_REVERSE) == len);
 		assert(memcmp(txt, tmp, len + 1) == 0);
 		assert(txt[len] == 0);
@@ -154,7 +143,7 @@ int main(void){
 	for(i = 0; i < nsubs; i++){
 		bin[blen++] = JSB_KEY;
 		blen += cpy(bin + blen, subs[i].key);
-		len = jsb(bin + blen, sizeof(bin) - blen, subs[i].value, strlen(subs[i].value), 0);
+		len = jsb(bin + blen, sizeof(bin) - blen, subs[i].value, strlen(subs[i].value), 0, -1);
 		assert(len <= JSB_SIZE_MAX && len > 0);
 		blen += --len;
 		assert(bin[blen] == JSB_DOC_END);
@@ -163,14 +152,14 @@ int main(void){
 	bin[blen++] = JSB_DOC_END;
 
 	/* ensure it decodes properly */
-	len = jsb(txt, sizeof(txt), bin, blen, JSB_REVERSE);
+	len = jsb(txt, sizeof(txt), bin, blen, JSB_REVERSE, -1);
 	assert(len <= JSB_SIZE_MAX && len > 0);
 
 	/* now check that retrieving each key results in the original input */
 	for(i = 0; i < nsubs; i++){
 		off = jsb_obj_get(bin, 0, NULL, subs[i].key, strlen(subs[i].key));
 		assert(off);
-		len = jsb(txt, sizeof(txt), bin + off, jsb_size(bin, off, NULL) + 1, JSB_REVERSE);
+		len = jsb(txt, sizeof(txt), bin + off, jsb_size(bin, off, NULL) + 1, JSB_REVERSE, -1);
 		assert(len <= JSB_SIZE_MAX);
 		assert(strlen(subs[i].value) == len);
 		assert(memcmp(subs[i].value, txt, len) == 0);
@@ -182,7 +171,7 @@ int main(void){
 	blen = 0;
 	bin[blen++] = JSB_ARR;
 	for(i = 0; i < nsubs; i++){
-		len = jsb(bin + blen, sizeof(bin) - blen, subs[i].value, strlen(subs[i].value), 0);
+		len = jsb(bin + blen, sizeof(bin) - blen, subs[i].value, strlen(subs[i].value), 0, -1);
 		assert(len <= JSB_SIZE_MAX && len > 0);
 		blen += --len;
 		assert(bin[blen] == JSB_DOC_END);
@@ -191,14 +180,14 @@ int main(void){
 	bin[blen++] = JSB_DOC_END;
 
 	/* ensure it decodes properly */
-	len = jsb(txt, sizeof(txt), bin, blen, JSB_REVERSE);
+	len = jsb(txt, sizeof(txt), bin, blen, JSB_REVERSE, -1);
 	assert(len <= JSB_SIZE_MAX && len > 0);
 
 	/* now check that retrieving each key results in the original input */
 	for(i = 0; i < nsubs; i++){
 		off = jsb_arr_get(bin, 0, NULL, i);
 		assert(off);
-		len = jsb(txt, sizeof(txt), bin + off, jsb_size(bin, off, NULL) + 1, JSB_REVERSE);
+		len = jsb(txt, sizeof(txt), bin + off, jsb_size(bin, off, NULL) + 1, JSB_REVERSE, -1);
 		assert(len <= JSB_SIZE_MAX);
 		assert(strlen(subs[i].value) == len);
 		assert(memcmp(subs[i].value, txt, len) == 0);

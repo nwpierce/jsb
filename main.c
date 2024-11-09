@@ -129,7 +129,7 @@ static int fdwrite(int fd, const void *buf, size_t len){
 		ssize_t w = write(fd, buf, len);
 		switch(w){
 			case -1:
-				if(EAGAIN == errno)
+				if(EINTR == errno || EAGAIN == errno)
 					continue;
 				/* fall through */
 			case 0:
@@ -150,8 +150,9 @@ static void usage(int fd){
 		"Options:\n"
 		"	-v  verify input only (no output)\n"
 		"	-s  force streaming input (disable mmap)\n"
-		"	-r  input window size (bytes, default 32mb)\n"
-		"	-w  output window size (bytes, default 32mb)\n"
+		"	-r  input window size (bytes, default 16mb)\n"
+		"	-w  output window size (bytes, default 16mb)\n"
+		"	-m  maximum json depth (default 64)\n"
 		"	-l  process concatenated json / binary records\n"
 		"	-a  force ascii output for binary -> json\n"
 		"	-t  log timing information to stderr\n"
@@ -162,10 +163,8 @@ static void usage(int fd){
 
 int main(int argc, char **argv){
 	int r, ch, ret = 1;
-	jsb_t jsb;
 	uint8_t *dst = NULL;
-	size_t dstlen = 0, rlen = 0, wlen = 0, doc = 0, rv;
-	size_t total = 0;
+	size_t dstlen = 0, rlen = 0, wlen = 0, rv;
 	ssize_t len;
 	int ifd = fileno(stdin);
 	int ofd = fileno(stdout);
@@ -173,15 +172,20 @@ int main(int argc, char **argv){
 	uint8_t *src;
 	int emit = 1, stream = 0, timeit = 0;
 	uint32_t flags = 0;
+	size_t maxdepth = 64;
+	size_t jsz;
+	int eof = 0;
 	block_t bk;
 	clock_t t0, t1;
+	jsb_t *jsb;
 	do{
-		switch(ch = getopt(argc, argv, "hsvaltr:w:")){
+		switch(ch = getopt(argc, argv, "hsvaltr:w:m:")){
 			case -1:  break;
 			case 's': stream = 1; break;
 			case 'v': emit = 0; break;
 			case 'w': wlen = strtoul(optarg, NULL, 0); break;
 			case 'r': rlen = strtoul(optarg, NULL, 0); break;
+			case 'm': maxdepth = strtoul(optarg, NULL, 0); break;
 			case 'l': flags |= JSB_LINES; break;
 			case 'a': flags |= JSB_ASCII; break;
 			case 't': timeit = 1; break;
@@ -191,9 +195,13 @@ int main(int argc, char **argv){
 	}while(ch != -1);
 
 	if(!rlen)
-		rlen = 1<<25;
+		rlen = 1<<24;
 	if(!wlen)
-		wlen = 1<<25;
+		wlen = 1<<24;
+
+	jsz = sizeof(jsb_unit_t) * jsb_units(maxdepth);
+	jsb = malloc(jsz);
+	assert(jsb);
 
 	dst = malloc(dstlen = wlen);
 	assert(dst);
@@ -225,38 +233,36 @@ int main(int argc, char **argv){
 			goto done;
 	}
 
-	jsb_init(&jsb, dstlen, flags);
-	jsb_srclen(&jsb, len);
-	total += len;
+	jsb_init(jsb, flags, jsz);
+	jsb->avail_out = dstlen;
+	jsb->next_out = dst;
+	jsb->avail_in = len;
+	jsb->next_in = src;
 
-again:
-	rv = jsb_update(&jsb, dst, src);
-	switch(rv){
-		default:
-			if(!(flags & JSB_LINES) && doc)
-				goto done;
-			doc++;
-			goto again;
-		case JSB_FILL:
-			len = block_next(&bk);
-			jsb_srclen(&jsb, len);
-			total += len;
-			goto again;
-		case JSB_FULL:
-			len = jsb_consume(&jsb, dst, -1);
+	rv = jsb_update(jsb);
+	while(JSB_OK == rv){
+		if(!jsb->avail_out){
 			if(emit){
-				r = fdwrite(ofd, dst, len);
+				r = fdwrite(ofd, dst, jsb->next_out - dst);
 				assert(0 == r);
 			}
-			goto again;
-		case JSB_ERROR:
-			goto done;
-		case JSB_EOF:
-			break;
+			jsb->avail_out = dstlen;
+			jsb->next_out = dst;
+		}
+		if(!jsb->avail_in && !eof){
+			jsb->next_in = src;
+			jsb->avail_in = block_next(&bk);
+			if(!jsb->avail_in){
+				jsb_eof(jsb);
+				eof = 1;
+			}
+		}
+		rv = jsb_update(jsb);
 	}
-	len = jsb_consume(&jsb, dst, -1);
+	if(JSB_ERROR == rv || jsb->avail_in)
+		goto done;
 	if(emit){
-		r = fdwrite(ofd, dst, len);
+		r = fdwrite(ofd, dst, jsb->next_out - dst);
 		assert(0 == r);
 		if((flags & JSB_REVERSE) && !(flags & JSB_LINES)){
 			r = fdwrite(ofd, "\n", 1);
@@ -266,9 +272,10 @@ again:
 	ret = close(ofd);
 	t1 = clock();
 	if(timeit)
-		fprintf(stderr, "%.3f mb/s\n", (CLOCKS_PER_SEC / 1048576.0) * total / (double)(t1 - t0));
+		fprintf(stderr, "%.3f mb/sec\n", jsb->total_in * (CLOCKS_PER_SEC / 1048576.0) / (t1 - t0));
 done:
 	block_fini(&bk);
 	free(dst);
+	free(jsb);
 	return ret;
 }

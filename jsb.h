@@ -20,19 +20,18 @@ extern "C"
 #endif
 
 /* flag bits for jsb() and jsb_init() */
-#define JSB_REVERSE   1 /* input binary, output json                            */
-#define JSB_ASCII     2 /* when emitting json, escape all codepoints above 0x7f */
-#define JSB_LINES     4 /* parse sequences of documents in either direction     */
-#define JSB_SIZE      8 /* causes jsb_init() to return jsb_t size in size_t's   */
+#define JSB_EOF       1 /* indicate the input buffer will not receive more data */
+#define JSB_REVERSE   2 /* input binary, output json                            */
+#define JSB_ASCII     4 /* when emitting json, escape all codepoints above 0x7f */
+#define JSB_LINES     8 /* parse sequences of documents in either direction     */
 
 /* flag bits for jsb_prepare() */
 #define JSB_STRLEN    1
 
 /* return code constants */
-#define JSB_ERROR     (SIZE_MAX - 0)
-#define JSB_FILL      (SIZE_MAX - 1)
-#define JSB_FULL      (SIZE_MAX - 2)
-#define JSB_EOF       (SIZE_MAX - 3)
+#define JSB_OK        0
+#define JSB_DONE      1
+#define JSB_ERROR     ((size_t)-1)
 
 /* largest valid size */
 #define JSB_SIZE_MAX  (SIZE_MAX - 4)
@@ -65,21 +64,47 @@ extern "C"
 #define JSB_ARR_END_S "\xfe"
 #define JSB_DOC_END_S "\xff"
 
+#ifndef JSB_DEFAULT_STACK_BYTES
+#define JSB_DEFAULT_STACK_BYTES 8
+#endif
+
+#define JSB_DEFAULT_DEPTH (JSB_DEFAULT_STACK_BYTES * CHAR_BIT)
+
+#define JSB_SIZE (sizeof(jsb_t) - JSB_DEFAULT_STACK_BYTES)
+
 typedef struct {
-	size_t dstpos;
-	size_t srcpos;
-	size_t dstlen;
-	size_t srclen;
-	size_t stack;
+	const uint8_t *next_in;
+	size_t        avail_in;
+	uint64_t      total_in;
+
+	uint8_t       *next_out;
+	size_t        avail_out;
+	uint64_t      total_out;
+
+	/* current json parser depth */
 	size_t depth;
-	size_t flags;
-	size_t eat;
+
+	/* maximum json parser depth */
+	const size_t maxdepth;
+
+	/* remaining fields are not useful to clients */
+	const uint32_t flags;
 	uint32_t code;
 	uint8_t state;
+	uint8_t key;
+	uint8_t obj;
 	uint8_t misc;
 	uint8_t ch;
-	uint8_t bt;
+	uint8_t outb;
+	uint8_t stack[JSB_DEFAULT_STACK_BYTES];
 } jsb_t;
+
+/* jsb_units() reports dynamic jsb size as a multiple of these */
+typedef union {
+	uint64_t u64;
+	size_t sz;
+	void *ptr;
+} jsb_unit_t;
 
 
 /**
@@ -87,64 +112,65 @@ typedef struct {
  **/
 
 /* convert JSON to binary (or binary to JSON if JSB_REVERSE is set in flags)
- * returns output byte length or JSB_ERROR
- * when emitting JSON, appends null byte to output, but does not include it in the returned size
+ * return:
+ *  output byte length or JSB_ERROR
+ * notes:
+ *  when emitting JSON, appends null byte to output, but does not include it in the returned size
+ *  pass maxdepth=(size_t)-1 to request default maxdepth (64)
  */
-JSB_API size_t jsb(void *dst, size_t dstlen, const void *src, size_t srclen, size_t flags);
+JSB_API size_t jsb(void *dst, size_t dstlen, const void *src, size_t srclen, uint32_t flags, size_t maxdepth);
 
 
 /**
  * Streaming API
  **/
 
-/* if JSB_SIZE is set in flags, return number of size_t's required to hold jsb_t
- * else initialize parser state with destination buffer size and return 0
+/* return:
+ *  number of jsb_unit_t's required to hold a jsb_t for desired maximum depth
+ * note:
+ *  pass maxdepth=(size_t)-1 to request default maxdepth (64)
+ *  example using dynamically sized arrays:
+ *   jsb_unit_t ju[jsb_units(1024)];
+ *   jsb_t *jsb = (jsb_t)ju;
+ *   size_t maxdepth = jsb_init(jsb, 0, sizeof(ju));
+ *  or via an allocator:
+ *   size_t jsz = jsb_units(1024) * sizeof(jsb_unit_t);
+ *   jsb_t *jsb = alloca(jsz);
+ *   jsb_init(jsb, 0, jsz);
  */
-JSB_API size_t jsb_init(jsb_t *jsb, size_t dstlen, size_t flags);
+JSB_API size_t __attribute__((const)) jsb_units(size_t maxdepth);
+
+/* initialize parser state, except for next_in/avail_in/next_out/avail_out
+ * return:
+ *  maximum supported object depth
+ * flags that may be bitwise OR'd:
+ *  JSB_REVERSE
+ *  JSB_ASCII
+ *  JSB_LINES
+ *  JSB_EOF
+ * note:
+ *  pass jsbsize < JSB_SIZE (recommend: 0) to indicate default jsb stack bytes
+ */
+JSB_API size_t jsb_init(jsb_t *jsb, uint32_t flags, size_t jsbsize);
 
 /* convert JSON input to binary output, or vice versa
  * return:
+ *  JSB_OK:    parser is fine
  *  JSB_ERROR: something has gone awry
- *  JSB_FILL:  call jsb_srclen() to indicate EOF or supply binary
- *  JSB_FULL:  call jsb_expand() and/or jsb_consume() to make space in dst
- *  JSB_EOF:   parser cleanly reached end of input stream
- *  <n>:       parsing current document completed, caller may consume/process first n bytes from dst
- * once JSB_FILL/JSB_FULL are dealt with, call jsb_update() again
  * note:
- *  n will be less than JSB_EOF
+ *  on JSB_OK, caller should check if input/output fields need updating
  *  duplicate keys are preserved
  *  key order is preserved
- * for JSON => binary:
- *  JSON structure, UTF-8 encoding, and surrogate pair sequences are strictly enforced
- * but for binary => JSON:
- *  input is not aggressively checked and can generate invalid json
+ *  for JSON => binary:
+ *   JSON structure, UTF-8 encoding, and surrogate pair sequences are strictly enforced
+ *  but for binary => JSON:
+ *   input is not aggressively checked and can generate invalid json
  */
-JSB_API size_t jsb_update(jsb_t *jsb, void *dst, const void *src);
+JSB_API size_t jsb_update(jsb_t *jsb);
 
-/* declare queued input byte length, use srclen=0 to indicate EOF
- * return 0 on succcess or JSB_ERROR if previous input still remains
- * note:
- *  only call when current source length is zero
- *  (after jsb_init() or when jsb_update() returns JSB_FILL)
+/* call to indicate no additional bytes will be provided as input
  */
-JSB_API size_t jsb_srclen(jsb_t *jsb, size_t srclen);
-
-/* supply current dst buffer and desired new size
- * return actual new size (which may be larger if requested size was too small)
- * note:
- *  to shrink, call jsb_dstlen(), then realloc() (or equivalent)
- *  to expand, call realloc(), then jsb_dstlen()
- */
-JSB_API size_t jsb_dstlen(jsb_t *jsb, void *dst, size_t dstlen);
-
-/* declare caller will consume up to the first n bytes from start of
- * dst buffer before calling additional methods against this jsb
- * return requested count or less, if fewer bytes are available
- * note:
- *  most efficient if caller is willing to consume all available data by passing:
- *    n = (size_t)-1
- */
-JSB_API size_t jsb_consume(jsb_t *jsb, void *dst, size_t n);
+JSB_API void jsb_eof(jsb_t *jsb);
 
 
 /**
@@ -217,7 +243,7 @@ JSB_API size_t jsb_arr_get(const void *base, size_t offset, const size_t *meta, 
  * note:
  *  you may specify the same key multiple times to look for duplicates
  */
-JSB_API void jsb_prepare(size_t *keyinfo, const void *keys, size_t flags);
+JSB_API void jsb_prepare(size_t *keyinfo, const void *keys, uint32_t flags);
 
 /* scan json object at supplied offset to harvest value offsets for a list of keys
  * optionally pass meta as filled by jsb_analyze() (or NULL)
