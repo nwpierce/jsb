@@ -56,16 +56,14 @@ jsb -vt < foo.geojson
 jsb -vt < foo.bin
 ```
 
-Linux - 3.3GHz i3-2120:
-
-| OS    | CPU                   | compiler   | json -> binary | binary -> json | extra cflags                  |
-|-------|-----------------------|------------|----------------|----------------|-------------------------------|
-| Linux | i3-2120@3.3ghz        | gcc 12.2.0 | 452 mb/sec     | 559 mb/sec     |                               |
-| Linux | i7-1060NG7@1.2/3.8ghz | gcc 12.2.0 | 701 mb/sec     | 953 mb/sec     |                               |
-| Linux | i7-1060NG7@1.2/3.8ghz | clang 16.0 | 542 mb/sec     | 600 mb/sec     |                               |
-| Linux | i7-1060NG7@1.2/3.8ghz | clang 16.0 | 738 mb/sec     | 806 mb/sec     | -mllvm -align-all-functions=6 |
-| macOS | i7-1060NG7@1.2/3.8ghz | clang 16.0 | 520 mb/sec     | 542 mb/sec     |                               |
-| macOS | Apple M1              | clang 16.0 | 907 mb/sec     | 966 mb/sec     |                               |
+| OS    | CPU                    | compiler   | json -> binary | binary -> json | extra cflags                  |
+|-------|------------------------|------------|----------------|----------------|-------------------------------|
+| Linux | i3-2120, 3.3ghz        | gcc 12.2.0 | 452 mb/sec     | 559 mb/sec     |                               |
+| Linux | i7-1060NG7, 1.2/3.8ghz | gcc 12.2.0 | 701 mb/sec     | 953 mb/sec     |                               |
+| Linux | i7-1060NG7, 1.2/3.8ghz | clang 16.0 | 542 mb/sec     | 600 mb/sec     |                               |
+| Linux | i7-1060NG7, 1.2/3.8ghz | clang 16.0 | 738 mb/sec     | 806 mb/sec     | -mllvm -align-all-functions=6 |
+| macOS | i7-1060NG7, 1.2/3.8ghz | clang 16.0 | 520 mb/sec     | 542 mb/sec     |                               |
+| macOS | Apple M1, 3.2ghz       | clang 16.0 | 907 mb/sec     | 966 mb/sec     |                               |
 
 ## Binary representation:
 
