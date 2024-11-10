@@ -1,14 +1,14 @@
 # libjsb
 
-Libjsb streams JSON to/from a friendly compact traversable binary representation with minimal storage overhead. Intended to support easy and efficient consumption and production of JSON. Motivation and/or inspiration for libjsb include [jsmn](https://github.com/zserge/jsmn) and Andrew Kelley's talk on [Data-Oriented Design](https://vimeo.com/649009599).
+Libjsb streams JSON to/from a friendly traversable binary representation with minimal storage overhead. Intended to support easy and efficient consumption and production of JSON.
 
 ## Features:
 
 * [fast](#benchmarks)
 * incremental
-	* zlib-ish interface
+	* zlib-ish streaming interface
 * embeddable
-	* no runtime dependencies
+	* no external runtime dependencies
 	* no internal heap memory allocations
 * configurable maximum nested object/array depth
 * maintains object key order
@@ -18,7 +18,8 @@ Libjsb streams JSON to/from a friendly compact traversable binary representation
 		* 0xe000 - 0x10ffff
 	* requires codepoints to be encoded in shortest possible sequences
 	* enforces proper surrogate pair sequences
-* numbers stored internally as strings
+* strings stored as raw UTF-8 sequences
+* numbers stored as strings
 	* no imposed loss of precision
 	* scientific notation exponents:
 		* `+` is stripped
@@ -28,11 +29,11 @@ Libjsb streams JSON to/from a friendly compact traversable binary representation
 	* includes an algorithm for numerically comparing stringified numbers
 		* without internally parsing to native floating point (and potentially losing precision)
 * reasonably compact [binary representation](#binary-representation)
-	* at most, two bytes larger than input JSON
+	* at most, two bytes larger than input JSON, but usually smaller
 * can optionally process multiple concatenated JSON documents
 * can optionally emit pure ASCII JSON
-* resulting binary form can be traversed
-	* may optionally be indexed to accelerate traversal routines
+* provides functions to traverse resulting binary
+	* binary may be indexed to accelerate traversal routines
 
 ## Potentially less desirable features:
 
