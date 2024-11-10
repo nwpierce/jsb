@@ -59,12 +59,12 @@ jsb -vt < foo.bin
 
 | OS    | CPU        | ghz     | compiler   | json -> binary | binary -> json | extra cflags                  |
 |-------|------------|---------|------------|----------------|----------------|-------------------------------|
-| Linux | i3-2120    | 3.3     | gcc 12.2.0 | 452 mb/sec     | 559 mb/sec     |                               |
-| Linux | i7-1060NG7 | 1.2/3.8 | gcc 12.2.0 | 701 mb/sec     | 953 mb/sec     |                               |
-| Linux | i7-1060NG7 | 1.2/3.8 | clang 16.0 | 542 mb/sec     | 600 mb/sec     |                               |
-| Linux | i7-1060NG7 | 1.2/3.8 | clang 16.0 | 738 mb/sec     | 806 mb/sec     | -mllvm -align-all-functions=6 |
-| macOS | i7-1060NG7 | 1.2/3.8 | clang 16.0 | 520 mb/sec     | 542 mb/sec     |                               |
-| macOS | Apple M1   | 3.2     | clang 16.0 | 907 mb/sec     | 966 mb/sec     |                               |
+| Linux | i3-2120    | 3.3     | gcc 12.2.0 | 453 mb/sec     | 559 mb/sec     |                               |
+| Linux | i7-1060NG7 | 1.2/3.8 | gcc 12.2.0 | 700 mb/sec     | 967 mb/sec     |                               |
+| Linux | i7-1060NG7 | 1.2/3.8 | clang 16.0 | 550 mb/sec     | 595 mb/sec     |                               |
+| Linux | i7-1060NG7 | 1.2/3.8 | clang 16.0 | 740 mb/sec     | 830 mb/sec     | -mllvm -align-all-functions=6 |
+| macOS | i7-1060NG7 | 1.2/3.8 | clang 16.0 | 526 mb/sec     | 552 mb/sec     |                               |
+| macOS | Apple M1   | 3.2     | clang 16.0 | 906 mb/sec     | 966 mb/sec     |                               |
 
 ## Binary representation:
 
