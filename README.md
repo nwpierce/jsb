@@ -1,6 +1,6 @@
 # libjsb
 
-Libjsb streams [JSON](https://www.json.org/) to/from a friendly traversable binary representation with minimal storage overhead. Intended to support easy and efficient consumption and production of JSON.
+Libjsb streams [JSON](https://www.json.org/) to/from a friendly traversable [binary representation](#binary-representation) with minimal storage overhead. Intended to support easy and efficient consumption and production of JSON.
 
 ## Features:
 
