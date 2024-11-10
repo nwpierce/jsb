@@ -494,14 +494,13 @@ PRIVATE size_t __attribute__((noinline)) _jsb_load(jsb_t *jsb){
 	size_t srcpos = 0;
 	size_t dstpos = 0;
 
-	/* read-only clone - no need to restore */
 	const int eof = jsb->flags & JSB_EOF;
 	const size_t srclen = jsb->avail_in;
 	const size_t dstlen = jsb->avail_out;
 	const uint8_t * const src = jsb->next_in;
 	uint8_t * const dst = jsb->next_out;
 
-	debug(("jsb_load(%p, %d)\n", (void *)jsb, eof));
+	debug(("jsb_load(%p)\n", (void *)jsb));
 
 	if(jsb->outb != JSB_INT_EOF){
 		assert(jsb->outb != 0xc0);
@@ -852,7 +851,6 @@ PRIVATE size_t __attribute__((noinline)) _jsb_dump(jsb_t *jsb){
 	size_t srcpos = 0;
 	size_t dstpos = 0;
 
-	/* clone, but no need to restore read-only ptr */
 	const int eof = jsb->flags & JSB_EOF;
 	const size_t srclen = jsb->avail_in;
 	const size_t dstlen = jsb->avail_out;
@@ -861,7 +859,7 @@ PRIVATE size_t __attribute__((noinline)) _jsb_dump(jsb_t *jsb){
 
 	const uint32_t ascii = jsb->flags & JSB_ASCII;
 
-	debug(("jsb_dump(%p, %d)\n", (void *)jsb, eof));
+	debug(("jsb_dump(%p)\n", (void *)jsb));
 
 	if(jsb->outb != JSB_INT_EOF){
 		assert(jsb->outb != 0xc0);
