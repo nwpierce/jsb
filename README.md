@@ -57,14 +57,17 @@ jsb -vt < foo.geojson
 jsb -vt < foo.bin
 ```
 
-| OS    | CPU        | ghz     | compiler   | json -> binary | binary -> json | extra cflags                  |
-|-------|------------|---------|------------|----------------|----------------|-------------------------------|
-| Linux | i3-2120    | 3.3     | gcc 12.2.0 | 453 mb/sec     | 559 mb/sec     |                               |
-| Linux | i7-1060NG7 | 1.2/3.8 | gcc 12.2.0 | 700 mb/sec     | 967 mb/sec     |                               |
-| Linux | i7-1060NG7 | 1.2/3.8 | clang 16.0 | 550 mb/sec     | 595 mb/sec     |                               |
-| Linux | i7-1060NG7 | 1.2/3.8 | clang 16.0 | 740 mb/sec     | 830 mb/sec     | -mllvm -align-all-functions=6 |
-| macOS | i7-1060NG7 | 1.2/3.8 | clang 16.0 | 526 mb/sec     | 552 mb/sec     |                               |
-| macOS | Apple M1   | 3.2     | clang 16.0 | 906 mb/sec     | 966 mb/sec     |                               |
+In my limited experience, jsb's use of mmap is slow on Intel macOS. To reach higher throughput, add a `-s` to the flags to force it to use `read()`.
+
+
+| OS    | CPU        | ghz     | compiler   | json -> binary | binary -> json |
+|-------|------------|---------|------------|----------------|----------------|
+| macOS | Apple M1   | 3.2     | clang 16.0 | 936 mb/sec     | 981 mb/sec     |
+| macOS | i7-1060NG7 | 1.2/3.8 | clang 16.0 | 654 mb/sec     | 780 mb/sec     |
+| Linux | i7-1060NG7 | 1.2/3.8 | gcc 12.2.0 | 645 mb/sec     | 848 mb/sec     |
+| Linux | i7-1060NG7 | 1.2/3.8 | clang 16.0 | 667 mb/sec     | 832 mb/sec     |
+| Linux | i3-2120    | 3.3     | gcc 12.2.0 | 423 mb/sec     | 495 mb/sec     |
+| Linux | i3-2120    | 3.3     | clang-16.0 | 421 mb/sec     | 427 mb/sec     |
 
 ## Binary representation:
 

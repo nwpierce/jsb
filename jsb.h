@@ -73,6 +73,7 @@ extern "C"
 #define JSB_SIZE (sizeof(jsb_t) - JSB_DEFAULT_STACK_BYTES)
 
 typedef struct {
+	/* client may modify only these six fields */
 	const uint8_t *next_in;
 	size_t        avail_in;
 	uint64_t      total_in;
@@ -87,15 +88,18 @@ typedef struct {
 	/* maximum json parser depth */
 	const size_t maxdepth;
 
-	/* remaining fields are not useful to clients */
-	const uint32_t flags;
+	/* remaining fields are for internal use */
 	uint32_t code;
+	unsigned key:1;
+	unsigned obj:1;
+	unsigned flag_eof:1;
+	unsigned flag_reverse:1;
+	unsigned flag_ascii:1;
+	unsigned flag_lines:1;
 	uint8_t state;
-	uint8_t key;
-	uint8_t obj;
 	uint8_t misc;
-	uint8_t ch;
 	uint8_t outb;
+	uint8_t ch;
 	uint8_t stack[JSB_DEFAULT_STACK_BYTES];
 } jsb_t;
 

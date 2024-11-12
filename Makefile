@@ -152,6 +152,10 @@ subtest: jsb JSONTestSuite/README.md Makefile $(addsuffix _test,$(TESTS))
 	@printf . >&2
 endif
 
+# add clean/distclean as deps for object files if present in targets
+%.o %.so: $(filter %clean,$(MAKECMDGOALS))
+jsb check: $(filter %clean,$(MAKECMDGOALS))
+
 # so that you can clean & build in one shot (try: make clean=1 <target>)
 ifneq (,$(filter distclean,$(MAKECMDGOALS)))
 distclean=1

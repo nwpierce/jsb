@@ -78,7 +78,7 @@ STATIC_ASSERT(('l' & 0x80) == 0, "assume 7-bit ascii");
 STATIC_ASSERT((']' & 0x80) == 0, "assume 7-bit ascii");
 STATIC_ASSERT(('}' & 0x80) == 0, "assume 7-bit ascii");
 
-/* the _jsb_load() and _jsb_dump() functions are designed as coroutines
+/* the _jsb_update() function is designed as a coroutine
  * (see: https://www.chiark.greenend.org.uk/~sgtatham/coroutines.html)
  * but use the gcc/clang __COUNTER__ macro instead of ANSI C's __LINE__ */
 
@@ -415,7 +415,10 @@ PRIVATE size_t _jsb_init(jsb_t *jsb, uint32_t flags, size_t jsbsize){
 	jsb->total_in = 0;
 	jsb->depth = 0;
 	*(size_t *)&jsb->maxdepth = stackbytes * 8;
-	*(uint32_t *)&jsb->flags = flags;
+	jsb->flag_eof = !!(flags & JSB_EOF);
+	jsb->flag_reverse = !!(flags & JSB_REVERSE);
+	jsb->flag_ascii = !!(flags & JSB_ASCII);
+	jsb->flag_lines = !!(flags & JSB_LINES);
 	jsb->obj = 0;
 	jsb->key = 0;
 	jsb->misc = 0;
@@ -428,7 +431,6 @@ PRIVATE size_t _jsb_init(jsb_t *jsb, uint32_t flags, size_t jsbsize){
 	return jsb->maxdepth;
 }
 
-#define F(x) f_ ## x
 #define J(x) j_ ## x
 
 #define JUMP(target) GOTO(J(target))
@@ -440,7 +442,7 @@ enum { CB = __COUNTER__ };
 	enum { ctr = __COUNTER__ - CB };           \
 	*((uint8_t *)&jsb->state) = ctr;           \
 	ret = sz;                                  \
-	GOTO(F(yield));                            \
+	goto yield;                            \
 	case ctr: break;                           \
 }while(0)
 
@@ -477,7 +479,7 @@ tag(next):                                     \
 		if(0xc0 == jsb->ch || 0xc1 == jsb->ch) \
 		    ERROR;                             \
 		debug(("ch: %02x\n", jsb->ch));        \
-	}else if(eof){                             \
+	}else if(jsb->flag_eof){                             \
 		debug(("ch: EOF\n"));                  \
 		jsb->ch = JSB_INT_EOF;                 \
 	}else{                                     \
@@ -486,21 +488,34 @@ tag(next):                                     \
 	}                                          \
 }while(0)
 
-#define ERROR do{ jsb->code = __LINE__; JUMP(error); }while(0)
+#if RELEASE
+#define ERROR goto error
+#else
+#define ERROR do{ jsb->code = __LINE__; goto error; }while(0)
+#endif
 
-PRIVATE size_t __attribute__((noinline)) _jsb_load(jsb_t *jsb){
+PRIVATE size_t _jsb_update(jsb_t *jsb){
 	size_t ret;
 
 	size_t srcpos = 0;
 	size_t dstpos = 0;
 
-	const int eof = jsb->flags & JSB_EOF;
 	const size_t srclen = jsb->avail_in;
 	const size_t dstlen = jsb->avail_out;
 	const uint8_t * const src = jsb->next_in;
 	uint8_t * const dst = jsb->next_out;
 
-	debug(("jsb_load(%p)\n", (void *)jsb));
+	if(0){ /* save state and suspend */
+yield:
+		debug(("yield: %d\n", ret));
+		*(size_t *)&jsb->avail_in -= srcpos;
+		*(size_t *)&jsb->avail_out -= dstpos;
+		*(uint8_t **)&jsb->next_in += srcpos;
+		*(uint8_t **)&jsb->next_out += dstpos;
+		jsb->total_in += srcpos;
+		jsb->total_out += dstpos;
+		return ret;
+	}
 
 	if(jsb->outb != JSB_INT_EOF){
 		assert(jsb->outb != 0xc0);
@@ -514,20 +529,13 @@ PRIVATE size_t __attribute__((noinline)) _jsb_load(jsb_t *jsb){
 	debug(("enter: %d\n", jsb->state));
 
 BEGIN(jsb->state):
+	if(jsb->flag_reverse)
+		goto reverse;
 	JUMP(value);
 
-F(yield): /* save state and suspend */
-	debug(("yield: %d\n", ret));
-	assert(jsb->obj  < 2);
-	assert(jsb->key  < 2);
-	assert(jsb->misc < 4);
-	*(size_t *)&jsb->avail_in -= srcpos;
-	*(size_t *)&jsb->avail_out -= dstpos;
-	*(uint8_t **)&jsb->next_in += srcpos;
-	*(uint8_t **)&jsb->next_out += dstpos;
-	jsb->total_in += srcpos;
-	jsb->total_out += dstpos;
-	return ret;
+error:
+	debug(("error: line %d\n", jsb->code));
+	while(1) YIELD(JSB_ERROR);
 
 J(escape):
 	NEXT(0);
@@ -826,13 +834,10 @@ J(hex):
 	}while(jsb->code >>= 8);
 	JUMP(string2);
 
-J(error): /* parsing failed */
-	debug(("error: line %d\n", jsb->code));
-	while(1) YIELD(JSB_ERROR);
 J(done):
 	APPEND(JSB_DOC_END);
 	NEXT(1);
-	if(jsb->flags & JSB_LINES){
+	if(jsb->flag_lines){
 /*		YIELD(JSB_OK); */
 		if(JSB_INT_EOF != jsb->ch)
 			JUMP(value2);
@@ -842,49 +847,13 @@ J(done):
 	}
 	while(1)
 		YIELD(JSB_DONE);
-END;
-}
 
-PRIVATE size_t __attribute__((noinline)) _jsb_dump(jsb_t *jsb){
-	size_t ret;
+#undef J
+#define J(x) r_ ## x
 
-	size_t srcpos = 0;
-	size_t dstpos = 0;
-
-	const int eof = jsb->flags & JSB_EOF;
-	const size_t srclen = jsb->avail_in;
-	const size_t dstlen = jsb->avail_out;
-	const uint8_t * const src = jsb->next_in;
-	uint8_t * const dst = jsb->next_out;
-
-	const uint32_t ascii = jsb->flags & JSB_ASCII;
-
-	debug(("jsb_dump(%p)\n", (void *)jsb));
-
-	if(jsb->outb != JSB_INT_EOF){
-		assert(jsb->outb != 0xc0);
-		if(dstlen)
-			dst[dstpos++] = jsb->outb;
-		else
-			return JSB_OK;
-		*(uint8_t *)&jsb->outb = JSB_INT_EOF;
-	}
-
-	debug(("enter: %d\n", jsb->state));
-
-BEGIN(jsb->state):
+reverse:
 	NEXT(0);
 	JUMP(start);
-
-F(yield): /* save state and suspend */
-	debug(("yield: %d\n", ret));
-	*(size_t *)&jsb->avail_in -= srcpos;
-	*(size_t *)&jsb->avail_out -= dstpos;
-	*(uint8_t **)&jsb->next_in += srcpos;
-	*(uint8_t **)&jsb->next_out += dstpos;
-	jsb->total_in += srcpos;
-	jsb->total_out += dstpos;
-	return ret;
 
 J(pop):
 	jsb->depth--;
@@ -954,7 +923,7 @@ J(string):
 	if(jsb->ch > 0xf4){
 		APPEND('"');
 		JUMP(next);
-	}else if(jsb->ch >= 0x20 && jsb->ch != '"' && jsb->ch != '\\' && (!ascii || jsb->ch < 0x80)){
+	}else if(jsb->ch >= 0x20 && jsb->ch != '"' && jsb->ch != '\\' && (!jsb->flag_ascii || jsb->ch < 0x80)){
 		ADDCH;
 		JUMP(string);
 	}else if(jsb->ch < 0x80){
@@ -1013,12 +982,12 @@ J(string):
 
 J(done):
 	/* parsing successful */
-	if(jsb->flags & JSB_LINES)
+	if(jsb->flag_lines)
 		APPEND('\n');  /* append a newline */
 	APPEND(0);       /* and null terminate */
 	dstpos--; /* but don't include in output */
 	debug(("done!\n"));
-	if(jsb->flags & JSB_LINES){
+	if(jsb->flag_lines){
 /*		YIELD(JSB_OK); */
 J(again):
 		NEXT(0);
@@ -1043,16 +1012,7 @@ J(again):
 	}
 	while(1)
 		YIELD(JSB_DONE);
-J(error): /* parsing failed */
-	debug(("error: line %d\n", jsb->code));
-	while(1) YIELD(JSB_ERROR);
 END;
-}
-
-PRIVATE size_t _jsb_update(jsb_t *jsb){
-	typedef size_t (*jsb_func)(jsb_t *);
-	static const jsb_func func[] = { _jsb_load, _jsb_dump };
-	return func[(jsb->flags & JSB_REVERSE) == JSB_REVERSE](jsb);
 }
 
 JSB_API size_t jsb_update(jsb_t *jsb){
@@ -1061,7 +1021,7 @@ JSB_API size_t jsb_update(jsb_t *jsb){
 
 JSB_API void jsb_eof(jsb_t *jsb){
 	debug(("eof\n"));
-	*(uint32_t *)&jsb->flags |= JSB_EOF;
+	jsb->flag_eof = 1;
 }
 
 JSB_API size_t jsb(void *dst, size_t dstlen, const void *src, size_t srclen, uint32_t flags, size_t maxdepth){
