@@ -440,7 +440,7 @@ enum { CB = __COUNTER__ };
 
 #define YIELD(sz) do{                          \
 	enum { ctr = __COUNTER__ - CB };           \
-	*((uint8_t *)&jsb->state) = ctr;           \
+	jsb->state = ctr;                          \
 	ret = sz;                                  \
 	goto yield;                                \
 	case ctr: break;                           \
@@ -459,7 +459,7 @@ enum { CB = __COUNTER__ };
 	if(dstpos != dstlen){                      \
 		dst[dstpos++] = t;                     \
 	}else{                                     \
-		*(uint8_t *)&jsb->outb = t;            \
+		jsb->outb = t;                         \
 		YIELD(JSB_OK);                         \
 	}                                          \
 }while(0)
@@ -508,10 +508,10 @@ PRIVATE size_t _jsb_update(jsb_t *jsb){
 	if(0){ /* save state and suspend */
 yield:
 		debug(("yield: %d\n", ret));
-		*(size_t *)&jsb->avail_in -= srcpos;
-		*(size_t *)&jsb->avail_out -= dstpos;
-		*(uint8_t **)&jsb->next_in += srcpos;
-		*(uint8_t **)&jsb->next_out += dstpos;
+		jsb->avail_in -= srcpos;
+		jsb->avail_out -= dstpos;
+		jsb->next_in += srcpos;
+		jsb->next_out += dstpos;
 		jsb->total_in += srcpos;
 		jsb->total_out += dstpos;
 		return ret;
@@ -523,7 +523,7 @@ yield:
 			dst[dstpos++] = jsb->outb;
 		else
 			return JSB_OK;
-		*(uint8_t *)&jsb->outb = JSB_INT_EOF;
+		jsb->outb = JSB_INT_EOF;
 	}
 
 	debug(("enter: %d\n", jsb->state));

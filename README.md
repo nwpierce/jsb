@@ -64,7 +64,7 @@ In my limited experience, jsb's use of mmap is slow on Intel macOS. To reach hig
 |-------|------------|---------|------------|----------------|----------------|
 | macOS | Apple M1   | 3.2     | clang 16.0 | 936 mb/sec     | 981 mb/sec     |
 | macOS | i7-1060NG7 | 1.2/3.8 | clang 16.0 | 654 mb/sec     | 780 mb/sec     |
-| Linux | i7-1060NG7 | 1.2/3.8 | gcc 12.2.0 | 645 mb/sec     | 848 mb/sec     |
+| Linux | i7-1060NG7 | 1.2/3.8 | gcc 12.2.0 | 650 mb/sec     | 852 mb/sec     |
 | Linux | i7-1060NG7 | 1.2/3.8 | clang 16.0 | 667 mb/sec     | 832 mb/sec     |
 | Linux | i3-2120    | 3.3     | gcc 12.2.0 | 423 mb/sec     | 495 mb/sec     |
 | Linux | i3-2120    | 3.3     | clang-16.0 | 421 mb/sec     | 427 mb/sec     |
