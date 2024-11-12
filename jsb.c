@@ -442,7 +442,7 @@ enum { CB = __COUNTER__ };
 	enum { ctr = __COUNTER__ - CB };           \
 	*((uint8_t *)&jsb->state) = ctr;           \
 	ret = sz;                                  \
-	goto yield;                            \
+	goto yield;                                \
 	case ctr: break;                           \
 }while(0)
 
@@ -479,7 +479,7 @@ tag(next):                                     \
 		if(0xc0 == jsb->ch || 0xc1 == jsb->ch) \
 		    ERROR;                             \
 		debug(("ch: %02x\n", jsb->ch));        \
-	}else if(jsb->flag_eof){                             \
+	}else if(jsb->flag_eof){                   \
 		debug(("ch: EOF\n"));                  \
 		jsb->ch = JSB_INT_EOF;                 \
 	}else{                                     \
