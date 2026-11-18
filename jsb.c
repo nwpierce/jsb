@@ -1501,7 +1501,7 @@ JSB_API int jsb_cmp(const void *base0, size_t offset0, const void *base1, size_t
 		case JSB_TRUE:  return (*n1 == JSB_FALSE) ?  3 : (*n1 == JSB_TRUE);
 		case JSB_STR:
 		case JSB_KEY:
-			if(*n1 != JSB_STR || *n1 != JSB_KEY)
+			if(*n1 != JSB_STR && *n1 != JSB_KEY)
 				return 0;
 			do{
 				t = (*++n0 >= 0xf5) - (*++n1 >= 0xf5);
