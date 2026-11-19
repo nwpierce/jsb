@@ -109,6 +109,85 @@ static void chk_analyze(uint8_t *bin){
 	}
 }
 
+/* jsb_cmp result encoding is (cmp << 1) | 1, or 0 when not comparable */
+static int cmp_txt(const char *a, const char *b, size_t offa, size_t offb){
+	uint8_t ba[256], bb[256];
+	size_t n;
+	/* distinct fill so a comparison that runs past a terminator can't pass by luck */
+	memset(ba, 0x01, sizeof(ba));
+	memset(bb, 0x02, sizeof(bb));
+	n = jsb(ba, sizeof(ba), a, strlen(a), 0, -1);
+	assert(n <= JSB_SIZE_MAX);
+	n = jsb(bb, sizeof(bb), b, strlen(b), 0, -1);
+	assert(n <= JSB_SIZE_MAX);
+	return jsb_cmp(ba, offa, bb, offb);
+}
+
+#define CMP(a, b, want) do{ \
+	assert(cmp_txt(a, b, 0, 0) == (((want) << 1) | 1)); \
+	assert(cmp_txt(b, a, 0, 0) == ((-(want) << 1) | 1)); \
+}while(0)
+
+static void chk_cmp(void){
+	size_t i, j, k;
+	/* ascending: each entry is strictly less than every later entry */
+	char *strs[] = {
+		"\"\"", "\"\\u0000\"", "\"a\"", "\"a\\u0000\"", "\"ab\"", "\"b\"", "\"\\u00e9\"", "\"\\ud800\\udc00\"",
+	};
+	char *nums[] = {
+		"-1e50", "-100", "-10", "-2", "-1.5", "-1", "-0.5", "-1e-9", "-0.2e-9", "-1e-50",
+		"0",
+		"1e-50", "0.15e-49", "2e-50", "1e-10", "0.2e-9", "1e-9", "0.01", "0.1", "0.5", "1", "1.5", "2", "10", "100", "1e50",
+	};
+	/* equal spellings */
+	char *eq[][3] = {
+		{"0", "-0", "0.000e5"}, {"1", "1.0", "10e-1"}, {"-1", "-1.0", "-0.1e1"}, {"120", "1.2e2", "0.12E+3"},
+		{"1e-10", "0.1e-9", "10e-11"}, {"1e-50", "0.1e-49", "100e-52"}, {"1e10", "0.1e11", "10e9"},
+	};
+
+	for(i = 0; i < COUNT(strs); i++){
+		CMP(strs[i], strs[i], 0);
+		for(j = i + 1; j < COUNT(strs); j++)
+			CMP(strs[i], strs[j], -1);
+	}
+	for(i = 0; i < COUNT(nums); i++){
+		CMP(nums[i], nums[i], 0);
+		for(j = i + 1; j < COUNT(nums); j++)
+			CMP(nums[i], nums[j], -1);
+	}
+	for(i = 0; i < COUNT(eq); i++)
+		for(j = 0; j < 3; j++)
+			for(k = 0; k < 3; k++)
+				CMP(eq[i][j], eq[i][k], 0);
+
+	/* keys compare like strings, across string/key too */
+	{
+		uint8_t ka[64], kb[64], sa[64];
+		memset(ka, 0x01, sizeof(ka));
+		memset(kb, 0x02, sizeof(kb));
+		memset(sa, 0x03, sizeof(sa));
+		assert(jsb(ka, sizeof(ka), "{\"a\":0}", 7, 0, -1) <= JSB_SIZE_MAX);
+		assert(jsb(kb, sizeof(kb), "{\"ab\":0}", 8, 0, -1) <= JSB_SIZE_MAX);
+		assert(jsb(sa, sizeof(sa), "\"a\"", 3, 0, -1) <= JSB_SIZE_MAX);
+		assert(ka[1] == JSB_KEY && kb[1] == JSB_KEY);
+		assert(jsb_cmp(ka, 1, kb, 1) == ((-1 * 2) | 1));
+		assert(jsb_cmp(kb, 1, ka, 1) == ((1 * 2) | 1));
+		assert(jsb_cmp(sa, 0, kb, 1) == ((-1 * 2) | 1));
+		assert(jsb_cmp(kb, 1, sa, 0) == ((1 * 2) | 1));
+		assert(jsb_cmp(ka, 1, sa, 0) == 1);
+	}
+
+	CMP("null", "null", 0);
+	CMP("false", "true", -1);
+	CMP("true", "true", 0);
+
+	/* different or non-scalar types are not comparable */
+	assert(cmp_txt("1", "\"1\"", 0, 0) == 0);
+	assert(cmp_txt("null", "false", 0, 0) == 0);
+	assert(cmp_txt("[]", "[]", 0, 0) == 0);
+	assert(cmp_txt("{}", "{}", 0, 0) == 0);
+}
+
 int main(void){
 	const int npass = sizeof(pass) / sizeof(*pass);
 	const int nsubs = sizeof(subs) / sizeof(*subs);
@@ -196,6 +275,8 @@ int main(void){
 	chk_analyze(bin);
 
 	chk_match();
+
+	chk_cmp();
 
 	return 0;
 }

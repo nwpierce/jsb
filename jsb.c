@@ -1414,6 +1414,10 @@ PRIVATE const uint8_t *step(int *r, ssize_t *d, int m, const uint8_t *ea, const 
 	x += y;          /* merge                                          */
 	*r = x % 10;     /* return right-most digit                        */
 	*d += x / 10;    /* shift right, and merge with delta              */
+	if(*r < 0){      /* canonicalize to 0..9 (ten's complement),       */
+		*r += 10;    /* borrowing from the next digit; a negative      */
+		*d -= 1;     /* exponent settles at d == -1 (sign extension)   */
+	}
 	return eb;       /* return possibly changed end-of-exponent marker */
 }
 
@@ -1461,13 +1465,17 @@ PRIVATE int numcmp(const uint8_t *n0, const uint8_t *n1){
 	m1 = 1 - (ns1.e_negative << 1);
 
 	/* now step through both exponents to compare, adding the delta on the fly */
-	while(d0 || d1 || c0 != ns0.epart || c1 != ns1.epart){
+	while((d0 && d0 != -1) || (d1 && d1 != -1) || c0 != ns0.epart || c1 != ns1.epart){
 		/* returns next least significant digit of result in r0/r1 */
 		c0 = step(&r0, &d0, m0, ns0.epart, c0);
 		c1 = step(&r1, &d1, m1, ns1.epart, c1);
 		/* if r0 == r1, preserve existing compare value */
 		r = r0 < r1 ? -1 : r0 > r1 ? 1 : r;
 	}
+
+	/* sign of each exponent outranks its digits */
+	if(d0 != d1)
+		r = d0 < d1 ? -1 : 1;
 
 	/* larger or smaller exponent wins */
 	if(!r){
@@ -1503,12 +1511,18 @@ JSB_API int jsb_cmp(const void *base0, size_t offset0, const void *base1, size_t
 		case JSB_KEY:
 			if(*n1 != JSB_STR && *n1 != JSB_KEY)
 				return 0;
-			do{
-				t = (*++n0 >= 0xf5) - (*++n1 >= 0xf5);
-				if(t) break;
+			for(;;){
+				const int e0 = *++n0 >= 0xf5, e1 = *++n1 >= 0xf5;
+				if(e0 || e1){
+					t = e1 - e0;
+					break;
+				}
 				t = *n0 - *n1;
-				t = (t > 0) - (t < 0);
-			}while(!t);
+				if(t){
+					t = (t > 0) - (t < 0);
+					break;
+				}
+			}
 			return (t<<1)|1;
 		case JSB_NUM:
 			if(*n1 != JSB_NUM)
