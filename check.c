@@ -124,8 +124,8 @@ static int cmp_txt(const char *a, const char *b, size_t offa, size_t offb){
 }
 
 #define CMP(a, b, want) do{ \
-	assert(cmp_txt(a, b, 0, 0) == (((want) << 1) | 1)); \
-	assert(cmp_txt(b, a, 0, 0) == ((-(want) << 1) | 1)); \
+	assert(cmp_txt(a, b, 0, 0) == (((want) * 2) + 1)); \
+	assert(cmp_txt(b, a, 0, 0) == ((-(want) * 2) + 1)); \
 }while(0)
 
 static void chk_cmp(void){
