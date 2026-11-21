@@ -623,7 +623,9 @@ J(string):
 		APPEND(JSB_STR);
 J(string2):
 	NEXT(0);
-	if('"' == jsb->ch){
+	if(JSB_INT_EOF == jsb->ch){
+		ERROR;
+	}else if('"' == jsb->ch){
 		JUMP(more);
 	}else if('\\' == jsb->ch){
 		JUMP(escape);
@@ -1523,12 +1525,15 @@ JSB_API int jsb_cmp(const void *base0, size_t offset0, const void *base1, size_t
 					break;
 				}
 			}
-			return (t<<1)|1;
+			break;
 		case JSB_NUM:
 			if(*n1 != JSB_NUM)
 				return 0;
-			return (numcmp(++n0, ++n1) << 1) | 1;
+			t = numcmp(++n0, ++n1);
+			break;
 	}
+	// return (t<<1)|1;
+	return t * 2 + 1;
 }
 
 /* ensure that all previously used jsb->state values actually fit */
