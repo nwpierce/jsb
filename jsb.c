@@ -1532,7 +1532,7 @@ JSB_API int jsb_cmp(const void *base0, size_t offset0, const void *base1, size_t
 			t = numcmp(++n0, ++n1);
 			break;
 	}
-	// return (t<<1)|1;
+	/* return (t<<1)|1; */
 	return t * 2 + 1;
 }
 
